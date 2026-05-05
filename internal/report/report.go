@@ -29,8 +29,9 @@ type Summary struct {
 	P95Latency    time.Duration
 	P99Latency    time.Duration
 	StdDev        time.Duration
-	StatusCodes   map[int]int
-	ErrorsByClass map[ErrorClass]int
+	StatusCodes         map[int]int
+	ErrorsByClass       map[ErrorClass]int
+	LatencyDistribution []Bucket
 }
 
 // Summarize collapses results into a Summary. elapsed is the wall-clock
@@ -68,6 +69,8 @@ func Summarize(results []loader.Result, elapsed time.Duration) Summary {
 	s.P99Latency = stats.P99
 	s.StdDev = stats.StdDev
 
+	s.LatencyDistribution = distribute(durations, defaultBuckets)
+
 	return s
 }
 
@@ -104,5 +107,7 @@ func Print(w io.Writer, s Summary) {
 			barLen := count * 20 / s.Successful
 			fmt.Fprintf(w, "  HTTP %d: %d %s\n", code, count, strings.Repeat("█", barLen))
 		}
+
+		printDistribution(w, s.LatencyDistribution)
 	}
 }
