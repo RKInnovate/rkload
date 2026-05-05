@@ -23,6 +23,12 @@ type Summary struct {
 	Elapsed     time.Duration
 	Throughput  float64
 	AvgLatency  time.Duration
+	MinLatency  time.Duration
+	MaxLatency  time.Duration
+	P50Latency  time.Duration
+	P95Latency  time.Duration
+	P99Latency  time.Duration
+	StdDev      time.Duration
 	StatusCodes map[int]int
 }
 
@@ -35,23 +41,30 @@ func Summarize(results []loader.Result, elapsed time.Duration) Summary {
 		StatusCodes: make(map[int]int),
 	}
 
-	var sumDur time.Duration
+	durations := make([]time.Duration, 0, len(results))
 	for _, r := range results {
 		if r.Err != nil {
 			s.Errors++
 			continue
 		}
 		s.Successful++
-		sumDur += r.Duration
+		durations = append(durations, r.Duration)
 		s.StatusCodes[r.StatusCode]++
 	}
 
 	if elapsed > 0 {
 		s.Throughput = float64(s.Total) / elapsed.Seconds()
 	}
-	if s.Successful > 0 {
-		s.AvgLatency = sumDur / time.Duration(s.Successful)
-	}
+
+	stats := computeLatencyStats(durations)
+	s.AvgLatency = stats.Avg
+	s.MinLatency = stats.Min
+	s.MaxLatency = stats.Max
+	s.P50Latency = stats.P50
+	s.P95Latency = stats.P95
+	s.P99Latency = stats.P99
+	s.StdDev = stats.StdDev
+
 	return s
 }
 
@@ -65,7 +78,14 @@ func Print(w io.Writer, s Summary) {
 	fmt.Fprintf(w, "Throughput:      %.2f req/sec\n", s.Throughput)
 
 	if s.Successful > 0 {
-		fmt.Fprintf(w, "Avg latency:     %s\n", s.AvgLatency.Round(time.Millisecond))
+		fmt.Fprintf(w, "\nLatency:\n")
+		fmt.Fprintf(w, "  avg:    %s\n", s.AvgLatency.Round(time.Millisecond))
+		fmt.Fprintf(w, "  min:    %s\n", s.MinLatency.Round(time.Millisecond))
+		fmt.Fprintf(w, "  max:    %s\n", s.MaxLatency.Round(time.Millisecond))
+		fmt.Fprintf(w, "  p50:    %s\n", s.P50Latency.Round(time.Millisecond))
+		fmt.Fprintf(w, "  p95:    %s\n", s.P95Latency.Round(time.Millisecond))
+		fmt.Fprintf(w, "  p99:    %s\n", s.P99Latency.Round(time.Millisecond))
+		fmt.Fprintf(w, "  stddev: %s\n", s.StdDev.Round(time.Millisecond))
 
 		fmt.Fprintf(w, "\nStatus codes:\n")
 		for code, count := range s.StatusCodes {

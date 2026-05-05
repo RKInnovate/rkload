@@ -37,6 +37,26 @@ func TestSummarize_MixedSuccessAndError(t *testing.T) {
 	if s.StatusCodes[200] != 2 || s.StatusCodes[500] != 1 {
 		t.Errorf("StatusCodes = %v, want {200: 2, 500: 1}", s.StatusCodes)
 	}
+
+	// 100ms, 200ms, 300ms successful → min=100, max=300.
+	// nearest-rank on n=3: p50 → idx ceil(1.5)-1 = 1 → 200ms;
+	// p95 → idx ceil(2.85)-1 = 2 → 300ms; p99 → idx ceil(2.97)-1 = 2 → 300ms.
+	cases := []struct {
+		name string
+		got  time.Duration
+		want time.Duration
+	}{
+		{"MinLatency", s.MinLatency, 100 * time.Millisecond},
+		{"MaxLatency", s.MaxLatency, 300 * time.Millisecond},
+		{"P50Latency", s.P50Latency, 200 * time.Millisecond},
+		{"P95Latency", s.P95Latency, 300 * time.Millisecond},
+		{"P99Latency", s.P99Latency, 300 * time.Millisecond},
+	}
+	for _, c := range cases {
+		if c.got != c.want {
+			t.Errorf("%s = %v, want %v", c.name, c.got, c.want)
+		}
+	}
 }
 
 func TestSummarize_AllErrors(t *testing.T) {
@@ -69,6 +89,12 @@ func TestPrint_RendersExpectedFields(t *testing.T) {
 		Elapsed:     2500 * time.Millisecond,
 		Throughput:  40.0,
 		AvgLatency:  120 * time.Millisecond,
+		MinLatency:  10 * time.Millisecond,
+		MaxLatency:  500 * time.Millisecond,
+		P50Latency:  100 * time.Millisecond,
+		P95Latency:  300 * time.Millisecond,
+		P99Latency:  450 * time.Millisecond,
+		StdDev:      80 * time.Millisecond,
 		StatusCodes: map[int]int{200: 90, 500: 5},
 	}
 	var buf bytes.Buffer
@@ -80,7 +106,13 @@ func TestPrint_RendersExpectedFields(t *testing.T) {
 		"Successful:      95",
 		"Errors:          5",
 		"Throughput:      40.00 req/sec",
-		"Avg latency:     120ms",
+		"avg:    120ms",
+		"min:    10ms",
+		"max:    500ms",
+		"p50:    100ms",
+		"p95:    300ms",
+		"p99:    450ms",
+		"stddev: 80ms",
 		"HTTP 200:",
 		"HTTP 500:",
 	} {
@@ -96,8 +128,8 @@ func TestPrint_OmitsLatencyAndStatusWhenAllErrors(t *testing.T) {
 	Print(&buf, s)
 	out := buf.String()
 
-	if strings.Contains(out, "Avg latency") {
-		t.Errorf("output should not mention Avg latency when no successes:\n%s", out)
+	if strings.Contains(out, "Latency:") {
+		t.Errorf("output should not include Latency block when no successes:\n%s", out)
 	}
 	if strings.Contains(out, "Status codes") {
 		t.Errorf("output should not mention Status codes when no successes:\n%s", out)
