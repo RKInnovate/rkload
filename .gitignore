@@ -1,0 +1,41 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Coverage output
+*.out
+coverage.html
+
+# Go workspace files
+go.work
+go.work.sum
+
+# Build artifacts
+/bin/
+/dist/
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Local test configs (not for commit)
+local.yaml
+*.local.yaml
