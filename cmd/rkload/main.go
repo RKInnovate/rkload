@@ -22,6 +22,20 @@ var (
 )
 
 func main() {
+	// Subcommand dispatch comes first so `rkload import openapi spec.yaml`
+	// doesn't get parsed by the top-level flag set (which would reject
+	// the unknown positional argument).
+	if len(os.Args) > 1 && os.Args[1] == "import" {
+		os.Exit(importMain(os.Args[2:]))
+	}
+
+	os.Exit(runMain())
+}
+
+// runMain hosts the legacy flag-driven entry point: -url, -config,
+// -version, -help, etc. Returning an int (instead of calling os.Exit
+// directly) keeps the function testable.
+func runMain() int {
 	url := flag.String("url", "", "Target URL to load test (single-endpoint mode)")
 	configPath := flag.String("config", "", "Path to a JSON config file (multi-endpoint mode; mutually exclusive with -url)")
 	concurrency := flag.Int("c", 10, "Number of concurrent workers (single-endpoint mode)")
@@ -33,21 +47,21 @@ func main() {
 
 	if *showVersion {
 		fmt.Printf("rkload %s (commit %s, built %s)\n", version, commit, date)
-		return
+		return 0
 	}
 
 	if *help {
-		flag.Usage()
-		return
+		printRootUsage()
+		return 0
 	}
 
 	if *configPath != "" && *url != "" {
 		fmt.Fprintln(os.Stderr, "Error: -config and -url are mutually exclusive")
-		os.Exit(1)
+		return 1
 	}
 
 	if *configPath != "" {
-		os.Exit(runFromConfig(*configPath))
+		return runFromConfig(*configPath)
 	}
 
 	if *url == "" {
@@ -55,17 +69,28 @@ func main() {
 		fmt.Fprintln(os.Stderr, "Examples:")
 		fmt.Fprintln(os.Stderr, "  rkload -url https://api.example.com/health -c 50 -n 1000")
 		fmt.Fprintln(os.Stderr, "  rkload -config rkload.config.json")
+		fmt.Fprintln(os.Stderr, "  rkload import openapi spec.yaml -o rkload.config.json")
 		flag.Usage()
-		os.Exit(1)
+		return 1
 	}
 
-	os.Exit(runSingle(loader.Options{
+	return runSingle(loader.Options{
 		URL:         *url,
 		Method:      *method,
 		Concurrency: *concurrency,
 		Requests:    *requests,
 		Timeout:     30 * time.Second,
-	}))
+	})
+}
+
+func printRootUsage() {
+	fmt.Fprintln(os.Stderr, "Usage:")
+	fmt.Fprintln(os.Stderr, "  rkload -url <URL> [-c N] [-n N] [-method M]   single-endpoint mode")
+	fmt.Fprintln(os.Stderr, "  rkload -config <FILE>                         multi-endpoint mode (JSON config)")
+	fmt.Fprintln(os.Stderr, "  rkload import {openapi|postman} <FILE> [...]  generate a config from a spec")
+	fmt.Fprintln(os.Stderr, "  rkload -version                               print version and exit")
+	fmt.Fprintln(os.Stderr, "")
+	flag.Usage()
 }
 
 // runSingle executes the legacy single-endpoint flow driven by -url.
@@ -145,4 +170,43 @@ func runFromConfig(path string) int {
 		return 1
 	}
 	return 0
+}
+
+// importMain dispatches to per-format handlers under `rkload import`.
+// Format handlers each own a flag.NewFlagSet so their flags don't
+// pollute the root command's flag space.
+func importMain(args []string) int {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "Usage: rkload import {openapi|postman} <file> [flags]")
+		return 1
+	}
+
+	switch args[0] {
+	case "openapi":
+		return importOpenAPI(args[1:])
+	case "postman":
+		return importPostman(args[1:])
+	case "-h", "--help", "help":
+		fmt.Fprintln(os.Stderr, "Usage: rkload import {openapi|postman} <file> [flags]")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "  openapi   Generate config from OpenAPI 3.x or Swagger 2.0 (JSON or YAML)")
+		fmt.Fprintln(os.Stderr, "  postman   Generate config from a Postman Collection v2.1")
+		return 0
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown import format %q. Supported: openapi, postman\n", args[0])
+		return 1
+	}
+}
+
+// importOpenAPI is stubbed in this commit. Implementation lands in the
+// next commit alongside the internal/importer package.
+func importOpenAPI(_ []string) int {
+	fmt.Fprintln(os.Stderr, "rkload import openapi: not implemented yet (lands in v0.3.1)")
+	return 1
+}
+
+// importPostman is stubbed in this commit. Implementation lands with v0.3.2.
+func importPostman(_ []string) int {
+	fmt.Fprintln(os.Stderr, "rkload import postman: not implemented yet (lands in v0.3.2)")
+	return 1
 }
