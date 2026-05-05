@@ -255,6 +255,80 @@ func TestOpenAPI3_YAMLProducesSameShapeAsJSON(t *testing.T) {
 	}
 }
 
+// ---- Filters -------------------------------------------------------------
+
+func TestOpenAPI3_TagFilterIncludesOnlyMatching(t *testing.T) {
+	f, _ := os.Open("testdata/petstore.openapi.json")
+	defer f.Close()
+	cfg, err := OpenAPI(f, OpenAPIOptions{TagFilter: "admin"})
+	if err != nil {
+		t.Fatalf("OpenAPI: %v", err)
+	}
+	// Only adminStats has the "admin" tag.
+	if len(cfg.GET) != 1 || cfg.GET[0].Name != "adminStats" {
+		t.Errorf("tag=admin should yield only adminStats, got %v", endpointNames(cfg.GET))
+	}
+	if len(cfg.POST) != 0 {
+		t.Errorf("tag=admin should produce no POST endpoints, got %d", len(cfg.POST))
+	}
+}
+
+func TestOpenAPI3_PathPrefixIncludesOnlyMatching(t *testing.T) {
+	f, _ := os.Open("testdata/petstore.openapi.json")
+	defer f.Close()
+	cfg, err := OpenAPI(f, OpenAPIOptions{PathPrefix: "/admin"})
+	if err != nil {
+		t.Fatalf("OpenAPI: %v", err)
+	}
+	if len(cfg.GET) != 1 || cfg.GET[0].Name != "adminStats" {
+		t.Errorf("path-prefix=/admin should yield only adminStats, got %v", endpointNames(cfg.GET))
+	}
+}
+
+func TestOpenAPI3_TagAndPathPrefixCombined(t *testing.T) {
+	f, _ := os.Open("testdata/petstore.openapi.json")
+	defer f.Close()
+	// tag=pets matches 4 ops, path=/pets prefix matches 3, combined = 3.
+	cfg, err := OpenAPI(f, OpenAPIOptions{TagFilter: "pets", PathPrefix: "/pets"})
+	if err != nil {
+		t.Fatalf("OpenAPI: %v", err)
+	}
+	if len(cfg.GET) != 2 || len(cfg.POST) != 1 {
+		t.Errorf("combined filter: GET=%d POST=%d, want 2/1; got names=%v",
+			len(cfg.GET), len(cfg.POST), endpointNames(cfg.GET))
+	}
+}
+
+func TestOpenAPI3_FilterMatchingNothingProducesEmptyConfig(t *testing.T) {
+	f, _ := os.Open("testdata/petstore.openapi.json")
+	defer f.Close()
+	cfg, err := OpenAPI(f, OpenAPIOptions{TagFilter: "no-such-tag"})
+	if err != nil {
+		t.Fatalf("OpenAPI: %v", err)
+	}
+	// Importer doesn't enforce "at least one endpoint" — that's the
+	// runtime loader's job. An empty filter result is a valid Config
+	// shape, but config.Validate() will reject it as "no endpoints
+	// defined" if a user tries to run it. That's the right
+	// separation of concerns: the importer reports what filtered,
+	// the loader reports what's runnable.
+	for _, g := range cfg.Groups() {
+		if len(g.Endpoints) != 0 {
+			t.Errorf("expected zero endpoints, got %d under %s", len(g.Endpoints), g.Method)
+		}
+	}
+}
+
+// endpointNames flattens a Endpoints slice down to names so test
+// output stays readable.
+func endpointNames(eps []config.Endpoint) []string {
+	out := make([]string, len(eps))
+	for i, ep := range eps {
+		out[i] = ep.Name
+	}
+	return out
+}
+
 func TestLooksLikeJSON(t *testing.T) {
 	cases := []struct {
 		in   string

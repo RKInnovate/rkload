@@ -209,6 +209,8 @@ func importOpenAPI(args []string) int {
 	concurrency := fs.Int("c", 0, "Default concurrency for generated endpoints (0 = config default)")
 	requests := fs.Int("n", 0, "Default request count for generated endpoints (0 = config default)")
 	timeout := fs.String("timeout", "", "Default timeout for generated endpoints (empty = config default)")
+	tagFilter := fs.String("tag", "", "Include only operations whose tags contain this value")
+	pathPrefix := fs.String("path-prefix", "", "Include only paths starting with this prefix (e.g. /api/v1/)")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "Usage: rkload import openapi <spec> [flags]")
 		fmt.Fprintln(os.Stderr, "")
@@ -235,6 +237,8 @@ func importOpenAPI(args []string) int {
 		DefaultConcurrency: *concurrency,
 		DefaultRequests:    *requests,
 		DefaultTimeout:     *timeout,
+		TagFilter:          *tagFilter,
+		PathPrefix:         *pathPrefix,
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
