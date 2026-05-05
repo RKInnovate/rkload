@@ -1,0 +1,60 @@
+name: Bug report
+description: Report a problem with rkload
+title: "[bug] "
+labels: ["bug", "triage"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the problem.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: Exact command(s) and any config used.
+      placeholder: |
+        rkload -url https://example.com/ -c 50 -n 500
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: rkload version
+      description: Output of `rkload -version`
+    validations:
+      required: true
+
+  - type: input
+    id: go-version
+    attributes:
+      label: Go version
+      description: Output of `go version`
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS / Architecture
+      placeholder: macOS 14.5 arm64
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / output
+      description: Any relevant terminal output. Code blocks render best in triple backticks.
+      render: shell
