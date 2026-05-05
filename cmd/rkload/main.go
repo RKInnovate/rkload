@@ -4,12 +4,15 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
 	"github.com/RKInnovate/rkload/internal/config"
+	"github.com/RKInnovate/rkload/internal/importer"
 	"github.com/RKInnovate/rkload/internal/loader"
 	"github.com/RKInnovate/rkload/internal/report"
 )
@@ -198,11 +201,71 @@ func importMain(args []string) int {
 	}
 }
 
-// importOpenAPI is stubbed in this commit. Implementation lands in the
-// next commit alongside the internal/importer package.
-func importOpenAPI(_ []string) int {
-	fmt.Fprintln(os.Stderr, "rkload import openapi: not implemented yet (lands in v0.3.1)")
-	return 1
+// importOpenAPI parses an OpenAPI 3.x or Swagger 2.0 spec and writes
+// the equivalent rkload Config. Output goes to -o or stdout.
+func importOpenAPI(args []string) int {
+	fs := flag.NewFlagSet("rkload import openapi", flag.ContinueOnError)
+	output := fs.String("o", "", "Output file (default: stdout)")
+	concurrency := fs.Int("c", 0, "Default concurrency for generated endpoints (0 = config default)")
+	requests := fs.Int("n", 0, "Default request count for generated endpoints (0 = config default)")
+	timeout := fs.String("timeout", "", "Default timeout for generated endpoints (empty = config default)")
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "Usage: rkload import openapi <spec> [flags]")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Flags:")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+	if fs.NArg() != 1 {
+		fs.Usage()
+		return 1
+	}
+	specPath := fs.Arg(0)
+
+	in, err := os.Open(specPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer in.Close()
+
+	cfg, err := importer.OpenAPI(in, importer.OpenAPIOptions{
+		DefaultConcurrency: *concurrency,
+		DefaultRequests:    *requests,
+		DefaultTimeout:     *timeout,
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+
+	return writeConfigJSON(cfg, *output)
+}
+
+// writeConfigJSON encodes cfg as pretty-printed JSON to outPath (empty
+// = stdout). Stdout writes don't get a trailing close, but file writes
+// flush on close — so a fatal mid-encode error doesn't leave a half-
+// written file behind under normal usage.
+func writeConfigJSON(cfg *config.Config, outPath string) int {
+	var w io.Writer = os.Stdout
+	if outPath != "" {
+		f, err := os.Create(outPath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		defer f.Close()
+		w = f
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(cfg); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	return 0
 }
 
 // importPostman is stubbed in this commit. Implementation lands with v0.3.2.
