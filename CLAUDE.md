@@ -32,8 +32,12 @@ The repo's directory layout advertises a clean separation:
 cmd/rkload/         CLI entry point
 internal/loader/    HTTP load engine
 internal/report/    aggregation + output
-internal/config/    YAML config (planned)
+internal/config/    JSON config (planned, schema in schemas/vN/)
+schemas/vN/         published JSON Schemas, immutable per version (v1 is current)
+docs/examples/      worked example configs
 ```
+
+**Schema versioning is URL-based and immutable.** A published schema file (e.g. `schemas/v1/config.schema.json`) is never modified once shipped — breaking changes go to a new `schemas/v2/` directory. User configs MUST pin a versioned `$schema` URL; the top-level `version` integer must match the URL's `vN` segment. There is intentionally no "latest" alias. See `schemas/README.md` for the full policy and update it when adding `v2`.
 
 **In v0.1.0 the `internal/*` packages are intentionally empty `doc.go` stubs.** The entire engine — flag parsing, worker pool, HTTP execution, aggregation, and output rendering — lives in `cmd/rkload/main.go`. The first task of v0.2.0 is to refactor `main.go` into `internal/loader` and `internal/report` per the layout described in `docs/architecture.md`. When adding functionality, check whether it belongs in the eventual home (loader/report/config) and either place it there or in `main.go` consistent with that future split — don't invent new packages.
 

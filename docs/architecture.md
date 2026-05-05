@@ -10,7 +10,8 @@ rkload/
 ├── internal/
 │   ├── loader/         # Core load generation engine
 │   ├── report/         # Result aggregation, percentiles, output formatting
-│   └── config/         # YAML config parsing and validation (v0.3.0+)
+│   └── config/         # JSON config parsing and validation (v0.3.0+)
+├── schemas/            # JSON Schemas published for editor tooling
 └── docs/               # User and contributor documentation
 ```
 
@@ -55,7 +56,15 @@ This design provides:
 
 ## Why the empty struct?
 
-The job channel uses `chan struct{}` rather than `chan int`. The empty struct (`struct{}{}`) is a zero-byte type — it carries no data, only signals existence. Workers don't care about the contents of a job at this stage; they just need a token telling them "do one request." When configuration arrives in v0.3.0, this will likely change to `chan Request`.
+The job channel uses `chan struct{}` rather than `chan int`. The empty struct (`struct{}{}`) is a zero-byte type — it carries no data, only signals existence. Workers don't care about the contents of a job at this stage; they just need a token telling them "do one request." When JSON configuration arrives in v0.3.0, this will likely change to `chan Request`.
+
+## Configuration format
+
+Starting in v0.3.0, rkload reads a JSON config file describing endpoints grouped by HTTP method. The format is defined by [`schemas/v1/config.schema.json`](../schemas/v1/config.schema.json) (Draft 2020-12) and carries a top-level integer `version` field so the schema can evolve. Editors that consume the `$schema` URL get autocomplete and validation for free; the runtime rejects unknown versions and reports schema violations with the offending JSON pointer. See [`docs/examples/basic.config.json`](./examples/basic.config.json) for a worked example.
+
+### Schema versioning
+
+Each schema version lives at its own immutable path (`schemas/v1/`, `schemas/v2/`, …) and is **never modified once published**. User configs MUST pin a versioned `$schema` URL; the top-level `version` integer in the config MUST match the version segment of that URL, and the runtime cross-checks both. There is no "latest" alias — pinning a version is the contract that lets old configs keep validating correctly long after newer schema versions ship. Full policy in [`schemas/README.md`](../schemas/README.md).
 
 ## Design principles
 

@@ -81,7 +81,7 @@ Status codes:
 `rkload` is under active development. The current version is a focused MVP. See [ROADMAP.md](./ROADMAP.md) for the planned feature progression:
 
 - **v0.2** — Latency percentiles (p50/p95/p99), distribution charts
-- **v0.3** — YAML-driven configuration, multi-endpoint suites
+- **v0.3** — JSON-driven configuration, multi-endpoint suites (schema v1 sketched in [`schemas/v1/config.schema.json`](./schemas/v1/config.schema.json); see [versioning policy](./schemas/README.md))
 - **v0.4** — Scenario chains, auth helpers, variable extraction
 - **v0.5** — JSON / Markdown / HTML reporting, CI integration
 - **v1.0** — Stable, documented, production-ready

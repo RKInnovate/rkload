@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/RKInnovate/rkload/main/schemas/v1/config.schema.json",
+  "title": "rkload Configuration (v1)",
+  "description": "Configuration file for rkload, schema version 1. Endpoints are grouped by HTTP method. Each endpoint defines a URL, optional headers and body, and per-endpoint load parameters (concurrency, request count, timeout). Configs MUST pin a versioned $schema URL (schemas/v1/...) — this file is immutable once published; future schema changes ship as schemas/v2/...",
+  "type": "object",
+
+  "required": ["version"],
+
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "format": "uri",
+      "description": "Reference to this JSON Schema. Including this field enables autocomplete and validation in editors like VS Code."
+    },
+    "version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Config schema version. Must be 1 for this schema, and MUST match the version segment of the $schema URL (e.g. .../schemas/v1/...). The runtime cross-checks both and rejects mismatches."
+    },
+    "GET":     { "$ref": "#/$defs/endpoints" },
+    "POST":    { "$ref": "#/$defs/endpoints" },
+    "PUT":     { "$ref": "#/$defs/endpoints" },
+    "PATCH":   { "$ref": "#/$defs/endpoints" },
+    "DELETE":  { "$ref": "#/$defs/endpoints" },
+    "HEAD":    { "$ref": "#/$defs/endpoints" },
+    "OPTIONS": { "$ref": "#/$defs/endpoints" }
+  },
+
+  "additionalProperties": false,
+
+  "$defs": {
+    "endpoints": {
+      "type": "array",
+      "description": "List of endpoints to load test under this HTTP method. May be empty.",
+      "items": { "$ref": "#/$defs/endpoint" }
+    },
+
+    "endpoint": {
+      "type": "object",
+      "title": "Endpoint",
+      "description": "A single HTTP endpoint to load test.",
+      "required": ["url"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Optional human-readable label for this endpoint, used in reports.",
+          "minLength": 1,
+          "maxLength": 80,
+          "examples": ["billing-plans-list", "auth-login"]
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://",
+          "description": "Target URL. Must include scheme (http:// or https://).",
+          "examples": ["https://api.example.com/v1/users"]
+        },
+        "headers": {
+          "type": "object",
+          "description": "HTTP headers sent with each request. All values must be strings.",
+          "additionalProperties": { "type": "string" },
+          "examples": [
+            { "Authorization": "Bearer eyJhbGc..." },
+            { "x-api-key": "your-api-key", "Content-Type": "application/json" }
+          ]
+        },
+        "body": {
+          "type": "string",
+          "description": "Request body sent verbatim. For JSON payloads, supply a JSON-encoded string. Empty string means no body.",
+          "default": "",
+          "examples": ["{\"email\":\"user@example.com\",\"password\":\"...\"}"]
+        },
+        "c": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000,
+          "default": 10,
+          "description": "Number of concurrent workers for this endpoint."
+        },
+        "requests": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 100,
+          "description": "Total number of requests to send to this endpoint."
+        },
+        "timeout": {
+          "type": "string",
+          "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+          "default": "30s",
+          "description": "Per-request timeout as a Go duration string (e.g. \"500ms\", \"30s\", \"1m30s\", \"1.5h\").",
+          "examples": ["500ms", "30s", "1m30s", "1.5h"]
+        }
+      }
+    }
+  }
+}

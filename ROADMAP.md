@@ -34,11 +34,12 @@ Make the report tell a real story, not just an average.
 
 Move beyond single-URL tests.
 
-- [ ] YAML config file support
-- [ ] Multiple endpoints per run
-- [ ] Custom headers (Authorization, User-Agent, etc.)
-- [ ] Request body templating
-- [ ] Per-endpoint concurrency overrides
+- [ ] JSON config file support (schema v1, see [`schemas/v1/config.schema.json`](./schemas/v1/config.schema.json))
+- [ ] Multiple endpoints per run, grouped by HTTP method
+- [ ] Per-endpoint headers (Authorization, User-Agent, etc.)
+- [ ] Per-endpoint request body
+- [ ] Per-endpoint concurrency, request count, and timeout overrides
+- [ ] URL-based schema versioning (`schemas/vN/...` immutable per version, see [`schemas/README.md`](./schemas/README.md))
 
 ---
 

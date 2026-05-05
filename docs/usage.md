@@ -99,7 +99,7 @@ Establishes a steady-state throughput number you can track over time.
 The next versions will add:
 
 - **v0.2.0** — `-output json` for machine-readable results, p50/p95/p99 percentiles
-- **v0.3.0** — `-config rkload.yaml` for multi-endpoint suites
+- **v0.3.0** — `-config rkload.json` for multi-endpoint suites (schema v1, see [`schemas/v1/config.schema.json`](../schemas/v1/config.schema.json) and the [example](./examples/basic.config.json); versioning policy in [`schemas/README.md`](../schemas/README.md))
 - **v0.4.0** — Multi-step scenarios with auth chains
 
 See [ROADMAP.md](../ROADMAP.md) for the full plan.
