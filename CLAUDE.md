@@ -28,15 +28,22 @@ CI (`.github/workflows/ci.yml`) runs the test/vet/build matrix on Go 1.22 and 1.
 
 ```
 cmd/rkload/                     flag parsing + runSingle (-url) + runFromConfig (-config)
+                                + importMain dispatcher (rkload import …)
 internal/loader/                Options (incl. Headers + Body), Result, Run
 internal/report/                Summary, Summarize, Print — aggregation + rendering
 internal/report/percentile.go   min/max/p50/p95/p99/stddev (nearest-rank)
 internal/report/errorclass.go   ErrorClass + Classify (timeout/conn refused/DNS/TLS/other)
 internal/report/distribution.go Bucket + linear histogram between min and max
 internal/config/                Config, Endpoint, Load, Validate, Groups — schema v1
+internal/importer/              OpenAPI 3.x + Swagger 2.0 → *config.Config
+                                (Postman v2.1 lands in v0.3.2)
 schemas/vN/                     published JSON Schemas, immutable per version
 docs/examples/                  worked example configs
 ```
+
+**Flag ordering for subcommands:** Go's stdlib `flag` package stops at the first positional argument, so `rkload import openapi <spec> --tag x` won't parse `--tag` — flags must precede the spec path (`--tag x <spec>`). Mentioned here because it surprises users coming from `getopt`-style CLIs.
+
+**External deps:** `gopkg.in/yaml.v3` is the only one (added with the importer for YAML spec support). Anything else should still go through "stdlib first" justification.
 
 **Schema versioning is URL-based and immutable.** A published schema file (e.g. `schemas/v1/config.schema.json`) is never modified once shipped — breaking changes go to a new `schemas/v2/` directory. User configs MUST pin a versioned `$schema` URL; the top-level `version` integer must match the URL's `vN` segment. There is intentionally no "latest" alias. See `schemas/README.md` for the full policy and update it when adding `v2`.
 

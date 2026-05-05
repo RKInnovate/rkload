@@ -46,19 +46,20 @@ Move beyond single-URL tests.
 
 ---
 
-## v0.3.1 — OpenAPI / Swagger import
+## v0.3.1 — OpenAPI / Swagger import ✅
 
 Generate rkload configs from existing API specifications so teams with OpenAPI specs don't hand-write `rkload.json`.
 
-- [ ] `rkload import openapi <spec>` subcommand reading JSON or YAML
-- [ ] OpenAPI 3.0 / 3.1 support
-- [ ] Swagger 2.0 support (legacy but common)
-- [ ] Map `paths.{path}.{method}` → endpoint, with URL = `servers[].url` + path
-- [ ] `operationId` (fallback `summary`) → endpoint `name`
-- [ ] `requestBody.content."application/json".example` → endpoint `body`
-- [ ] Filter flags: `--tag`, `--path-prefix`, `--method` so a 200-endpoint spec doesn't load-test all of them
-- [ ] Defaults for `c` / `requests` / `timeout` from CLI flags so the generated file is immediately runnable
-- [ ] Auth headers emitted as `REPLACE_ME` placeholders (specs don't carry real tokens)
+- [x] `rkload import openapi <spec>` subcommand reading JSON or YAML
+- [x] OpenAPI 3.x support
+- [x] Swagger 2.0 support (legacy but common)
+- [x] Map `paths.{path}.{method}` → endpoint, with URL = `servers[].url` (or schemes/host/basePath for Swagger 2) + path
+- [x] `operationId` → endpoint `name` (falls back to `method-path-with-dashes`)
+- [x] `requestBody.content."application/json".example` (OpenAPI 3) and `parameters[in=body].x-example`/`example` (Swagger 2) → endpoint `body`
+- [x] Filter flags: `--tag`, `--path-prefix`
+- [x] Defaults for `c` / `requests` / `timeout` from CLI flags so the generated file is immediately runnable
+- [x] Auth headers emitted as `REPLACE_ME` placeholders (specs don't carry real tokens)
+- [x] Deterministic output (paths sorted lexically, methods in fixed order) so re-runs produce byte-identical files
 
 ---
 

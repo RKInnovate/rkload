@@ -162,11 +162,81 @@ match `version`, missing `url`, non-`http(s)` scheme, malformed `timeout`,
 out-of-range `c`, name longer than 80 chars, and unknown top-level fields
 (catches typos like `TRACE` or method-name case mismatches).
 
+## Generating configs from API specs
+
+`rkload import` produces a ready-to-run rkload config from an existing
+API specification, so teams with OpenAPI specs don't hand-write
+`rkload.config.json`.
+
+```bash
+rkload import openapi spec.yaml -o rkload.config.json
+rkload import openapi -c 50 -n 1000 spec.json -o rkload.config.json
+rkload import openapi --tag billing spec.yaml -o billing.config.json
+rkload import openapi --path-prefix /api/v1/ spec.yaml -o v1.config.json
+```
+
+Supports OpenAPI 3.x and Swagger 2.0; both JSON and YAML are
+auto-detected by inspecting the first non-whitespace byte.
+
+### Flags
+
+| Flag             | Default        | Description                                                              |
+|------------------|----------------|--------------------------------------------------------------------------|
+| `-o`             | _(stdout)_     | Output file                                                              |
+| `-c`             | `0`            | Default concurrency for generated endpoints (`0` = config default `10`)  |
+| `-n`             | `0`            | Default request count (`0` = config default `100`)                       |
+| `-timeout`       | `""`           | Default timeout (`""` = config default `30s`)                            |
+| `--tag`          | _(none)_       | Include only operations whose tags contain this value                    |
+| `--path-prefix`  | _(none)_       | Include only paths starting with this prefix (e.g. `/api/v1/`)           |
+
+> **Flag ordering:** Flags must come before the spec path. Go's stdlib
+> flag parser stops at the first positional argument, so
+> `rkload import openapi spec.yaml --tag x` is wrong — write
+> `rkload import openapi --tag x spec.yaml` instead.
+
+### What gets mapped
+
+- **URL** — `servers[0].url + path` (OpenAPI 3) or
+  `schemes[0]://host + basePath + path` (Swagger 2). Errors clearly
+  if the spec doesn't carry enough info to construct a full URL.
+- **Method** — operation's HTTP method, grouped under the matching
+  schema key (`GET`, `POST`, ...).
+- **Name** — `operationId` if set, otherwise
+  `method-path-with-dashes`, clamped to the schema's 80-char limit.
+- **Body** — JSON example pulled from
+  `requestBody.content."application/json".example` (OpenAPI 3) or
+  the `in:"body"` parameter's `example` / `x-example` (Swagger 2).
+  Object examples are JSON-encoded; strings pass through.
+- **Headers** — `Content-Type: application/json` is added when a
+  body is emitted. `Authorization: REPLACE_ME` is added for any
+  operation with an effective security requirement (per-op security
+  overrides global; explicit `security: []` opts out).
+- **Defaults** — `c`, `requests`, and `timeout` come from the CLI
+  flags so the generated file is immediately runnable.
+
+### Limitations
+
+- **Path templates left as-is.** `/users/{id}` in the spec becomes
+  `/users/{id}` in the config. Guessing a value (e.g. from a
+  parameter `example`) would silently wrong-load-test the wrong
+  resources, so you edit these yourself before running.
+- **Auth tokens are placeholders.** Specs don't carry real
+  credentials. Grep the output for `REPLACE_ME` to find every
+  endpoint that needs a real header value.
+- **No body schemas.** Only literal `example` / `x-example` values
+  are extracted; JSON Schema-driven payload generation is out of
+  scope for the importer (write the body by hand for those).
+
+### Determinism
+
+Re-running the importer on the same spec produces a byte-identical
+output file (paths sorted lexically, methods in fixed order). This
+matters when you commit the generated config and review changes
+under `git diff` — the diff only shows real spec changes, not
+iteration-order noise.
+
 ## Coming soon
 
-The next versions will add:
-
-- **v0.3.1** — `rkload import openapi <spec>` to generate configs from OpenAPI / Swagger
 - **v0.3.2** — `rkload import postman <collection>` for Postman Collection v2.1
 - **v0.4.0** — Multi-step scenarios with auth chains
 - **v0.5.0** — `-output json` / Markdown / HTML for machine-readable results and CI integration

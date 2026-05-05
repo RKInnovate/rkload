@@ -135,13 +135,43 @@ See [`docs/examples/basic.config.json`](./docs/examples/basic.config.json) for a
 
 ---
 
+## Generating configs from existing API specs
+
+If you already have an OpenAPI 3.x, Swagger 2.0, or (next release) Postman Collection, `rkload import` produces a ready-to-run config:
+
+```bash
+# OpenAPI 3.x or Swagger 2.0 (JSON or YAML, auto-detected)
+rkload import openapi spec.yaml -o rkload.config.json
+
+# Filter to a single tag or path subtree
+rkload import openapi --tag billing spec.yaml -o billing.config.json
+rkload import openapi --path-prefix /api/v1/ spec.yaml -o v1.config.json
+
+# Override per-endpoint defaults at generation time
+rkload import openapi -c 50 -n 1000 -timeout 10s spec.yaml -o rkload.config.json
+```
+
+What you get:
+
+- Each operation becomes one endpoint, grouped by HTTP method
+- `operationId` is the endpoint's `name` (falls back to `method-path`)
+- `requestBody.example` (OpenAPI 3) and `parameters[in=body].example` / `x-example` (Swagger 2) become the request `body`
+- Operations with security requirements get `Authorization: REPLACE_ME` placeholders — grep for `REPLACE_ME` to find every endpoint that needs a real token before running
+- Path templates like `/users/{id}` are emitted verbatim — substituting them would mean guessing values, so you edit them yourself
+
+Output is deterministic — re-running the importer on the same spec produces a byte-identical file, so generated configs are review-friendly under `git diff`.
+
+> **Flag ordering:** Go's stdlib flag parser stops at the first positional, so flags must come before the spec path: `rkload import openapi --tag x spec.yaml`, not `rkload import openapi spec.yaml --tag x`.
+
+---
+
 ## Roadmap
 
 `rkload` is under active development. The current version is a focused MVP. See [ROADMAP.md](./ROADMAP.md) for the planned feature progression:
 
 - **v0.2** — Latency percentiles (p50/p95/p99), error grouping, distribution histogram ✅
 - **v0.3** — JSON-driven configuration, multi-endpoint suites ✅ (schema v1 in [`schemas/v1/config.schema.json`](./schemas/v1/config.schema.json); see [versioning policy](./schemas/README.md))
-- **v0.3.1** — `rkload import openapi <spec>` to generate configs from OpenAPI / Swagger
+- **v0.3.1** — `rkload import openapi <spec>` to generate configs from OpenAPI / Swagger ✅
 - **v0.3.2** — `rkload import postman <collection>` for Postman Collection v2.1
 - **v0.4** — Scenario chains, auth helpers, variable extraction
 - **v0.5** — JSON / Markdown / HTML reporting, CI integration

@@ -41,6 +41,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stale YAML config sketch (`docs/examples/basic.yaml.example`); will be
   re-introduced as JSON when scenarios land in v0.4.0
 
+## [0.3.1] - TBD
+
+### Added
+- `internal/importer` package: `OpenAPI(io.Reader, OpenAPIOptions) (*config.Config, error)`
+  auto-detects OpenAPI 3.x vs Swagger 2.0 by inspecting the top-level
+  `openapi`/`swagger` key and parses both into a v1 rkload Config that
+  passes `config.Validate` immediately
+- `rkload import openapi <spec>` subcommand with `-o` (output file,
+  default stdout), `-c`/`-n`/`-timeout` (per-endpoint defaults),
+  `--tag` and `--path-prefix` filters
+- YAML support via `gopkg.in/yaml.v3` (the project's first external
+  dependency). Format detected from the first non-whitespace byte;
+  YAML inputs are converted to JSON in-memory so the spec parsers
+  only ever see canonical JSON
+- Generated configs pin the canonical `$schema` URL and emit
+  `Authorization: REPLACE_ME` placeholders for any operation with a
+  security requirement so users can grep across hundreds of endpoints
+- Deterministic output: paths sorted lexically, methods in fixed
+  order, byte-identical re-runs
+
+### Changed
+- `cmd/rkload/main.go` now dispatches `rkload import …` to a
+  separate handler before top-level flag parsing, so positional
+  args after a subcommand don't trip the root flag set
+
 ## [0.3.0] - TBD
 
 ### Added
@@ -98,7 +123,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - HTTP status code histogram with bar chart
 - Worker pool architecture with bounded concurrency
 
-[Unreleased]: https://github.com/RKInnovate/rkload/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/RKInnovate/rkload/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/RKInnovate/rkload/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/RKInnovate/rkload/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/RKInnovate/rkload/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/RKInnovate/rkload/releases/tag/v0.1.0
