@@ -73,15 +73,18 @@ Each schema version lives at its own immutable path (`schemas/v1/`, `schemas/v2/
 3. **Errors are values.** Failed requests are recorded as data, not panics. The tool keeps running.
 4. **CI-friendly.** Non-zero exit on errors. Machine-readable output formats coming in v0.5.
 
-## Where things will live as the project grows
+## Where things live
 
-| Concern | Today | Future home |
-|---|---|---|
-| HTTP execution | `cmd/rkload/main.go` | `internal/loader/loader.go` |
-| Result aggregation | `cmd/rkload/main.go` | `internal/report/report.go` |
-| Percentile computation | _(not yet)_ | `internal/report/percentile.go` |
-| YAML config | _(not yet)_ | `internal/config/config.go` |
-| Scenarios / chains | _(not yet)_ | `internal/scenario/scenario.go` |
-| Auth helpers | _(not yet)_ | `internal/auth/auth.go` |
+| Concern                | Home                                  |
+|------------------------|---------------------------------------|
+| HTTP execution         | `internal/loader/loader.go`           |
+| Result aggregation     | `internal/report/report.go`           |
+| Percentile computation | `internal/report/percentile.go`       |
+| Error classification   | `internal/report/errorclass.go`       |
+| Latency distribution   | `internal/report/distribution.go`     |
+| JSON config (v0.3.0+)  | `internal/config/` (schema in `schemas/v1/`) |
+| Scenarios / chains     | `internal/scenario/` (v0.4.0)         |
+| Auth helpers           | `internal/auth/` (v0.4.0)             |
+| Output formats         | `internal/report/format_*.go` (v0.5.0)|
 
-The current single-file implementation is intentional for v0.1.0. Refactoring into the layout above is the first task of v0.2.0.
+`cmd/rkload/main.go` is intentionally minimal: flag parsing, building a `loader.Options`, calling `loader.Run`, handing the results to `report.Summarize` + `report.Print`, and applying the exit-code policy. Anything else belongs in `internal/`.

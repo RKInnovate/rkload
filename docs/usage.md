@@ -30,18 +30,32 @@ Successful:      1000
 Errors:          0
 Total time:      5.563s
 Throughput:      179.77 req/sec
-Avg latency:     545ms
+
+Latency:
+  avg:    545ms
+  min:    368ms
+  max:    1.688s
+  p50:    488ms
+  p95:    1.207s
+  p99:    1.588s
+  stddev: 169ms
 
 Status codes:
   HTTP 200: 1000 ████████████████████
+
+Latency distribution:
+     368ms - 500ms   :   823 ██████████████████████████████
+     500ms - 632ms   :   102 ███
+     ...
 ```
 
 - **Total time** — wall clock for the entire test
 - **Throughput** — requests per second sustained across the full test
-- **Avg latency** — mean response time across successful requests only
+- **Latency** — `avg` is the mean across successful requests; `p95`/`p99` are nearest-rank percentiles and are what you should size production against; `stddev` quantifies spread
 - **Status codes** — distribution of HTTP response codes (bar is relative to total successful)
+- **Latency distribution** — ten linear buckets between min and max so the *shape* of the distribution (long tail, bimodality, narrow vs spread) is visible at a glance, not just summary statistics
 
-> Average latency hides cold starts and tail latency. Percentile reporting (p50/p95/p99) lands in v0.2.0 and is what you actually want to look at before going to production.
+When requests fail, an additional **Errors by class** block appears between the basic counts and the latency block, bucketing failures into `timeout`, `connection refused`, `DNS`, `TLS`, and `other` so a 100% failure rate can be diagnosed without inspecting individual errors.
 
 ## Choosing concurrency
 
@@ -98,8 +112,8 @@ Establishes a steady-state throughput number you can track over time.
 
 The next versions will add:
 
-- **v0.2.0** — `-output json` for machine-readable results, p50/p95/p99 percentiles
 - **v0.3.0** — `-config rkload.json` for multi-endpoint suites (schema v1, see [`schemas/v1/config.schema.json`](../schemas/v1/config.schema.json) and the [example](./examples/basic.config.json); versioning policy in [`schemas/README.md`](../schemas/README.md))
 - **v0.4.0** — Multi-step scenarios with auth chains
+- **v0.5.0** — `-output json` / Markdown / HTML for machine-readable results and CI integration
 
 See [ROADMAP.md](../ROADMAP.md) for the full plan.

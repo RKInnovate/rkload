@@ -24,22 +24,23 @@ CI (`.github/workflows/ci.yml`) runs the test/vet/build matrix on Go 1.22 and 1.
 
 ## Architecture
 
-### Current state vs. intended layout (important)
-
-The repo's directory layout advertises a clean separation:
+### Layout
 
 ```
-cmd/rkload/         CLI entry point
-internal/loader/    HTTP load engine
-internal/report/    aggregation + output
-internal/config/    JSON config (planned, schema in schemas/vN/)
-schemas/vN/         published JSON Schemas, immutable per version (v1 is current)
-docs/examples/      worked example configs
+cmd/rkload/                     flag parsing + orchestration only
+internal/loader/                Options, Result, Run — worker pool + HTTP execution
+internal/report/                Summary, Summarize, Print — aggregation + rendering
+internal/report/percentile.go   min/max/p50/p95/p99/stddev (nearest-rank)
+internal/report/errorclass.go   ErrorClass + Classify (timeout/conn refused/DNS/TLS/other)
+internal/report/distribution.go Bucket + linear histogram between min and max
+internal/config/                JSON config (planned for v0.3.0; schema in schemas/v1/)
+schemas/vN/                     published JSON Schemas, immutable per version
+docs/examples/                  worked example configs
 ```
 
 **Schema versioning is URL-based and immutable.** A published schema file (e.g. `schemas/v1/config.schema.json`) is never modified once shipped — breaking changes go to a new `schemas/v2/` directory. User configs MUST pin a versioned `$schema` URL; the top-level `version` integer must match the URL's `vN` segment. There is intentionally no "latest" alias. See `schemas/README.md` for the full policy and update it when adding `v2`.
 
-**In v0.1.0 the `internal/*` packages are intentionally empty `doc.go` stubs.** The entire engine — flag parsing, worker pool, HTTP execution, aggregation, and output rendering — lives in `cmd/rkload/main.go`. The first task of v0.2.0 is to refactor `main.go` into `internal/loader` and `internal/report` per the layout described in `docs/architecture.md`. When adding functionality, check whether it belongs in the eventual home (loader/report/config) and either place it there or in `main.go` consistent with that future split — don't invent new packages.
+`cmd/rkload/main.go` is deliberately small: parse flags → build `loader.Options` → `loader.Run` → `report.Summarize` → `report.Print` → exit-code policy. New behavior belongs in `internal/`, not in `main.go`.
 
 ### Concurrency model
 

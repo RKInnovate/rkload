@@ -18,15 +18,16 @@ The minimum viable load tester.
 
 ---
 
-## v0.2.0 — Better metrics
+## v0.2.0 — Better metrics ✅
 
 Make the report tell a real story, not just an average.
 
-- [ ] p50 / p95 / p99 latency percentiles
-- [ ] Min / max latency
-- [ ] Standard deviation
-- [ ] Failed request grouping by error type
-- [ ] Sorted latency distribution output
+- [x] p50 / p95 / p99 latency percentiles
+- [x] Min / max latency
+- [x] Standard deviation
+- [x] Failed request grouping by error class (timeout / connection refused / DNS / TLS / other)
+- [x] Linear-bucketed latency distribution histogram
+- [x] Engine extracted to `internal/loader`, reporting to `internal/report`
 
 ---
 

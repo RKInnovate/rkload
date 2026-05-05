@@ -56,10 +56,30 @@ Successful:      1000
 Errors:          0
 Total time:      5.563s
 Throughput:      179.77 req/sec
-Avg latency:     545ms
+
+Latency:
+  avg:    545ms
+  min:    368ms
+  max:    1.688s
+  p50:    488ms
+  p95:    1.207s
+  p99:    1.588s
+  stddev: 169ms
 
 Status codes:
   HTTP 200: 1000 ████████████████████
+
+Latency distribution:
+     368ms - 500ms   :   823 ██████████████████████████████
+     500ms - 632ms   :   102 ███
+     632ms - 764ms   :    34 █
+     764ms - 896ms   :    14
+     896ms - 1.028s  :     8
+    1.028s - 1.16s   :     5
+     1.16s - 1.292s  :     7
+    1.292s - 1.424s  :     3
+    1.424s - 1.556s  :     2
+    1.556s - 1.688s  :     2
 ```
 
 ---
@@ -80,7 +100,7 @@ Status codes:
 
 `rkload` is under active development. The current version is a focused MVP. See [ROADMAP.md](./ROADMAP.md) for the planned feature progression:
 
-- **v0.2** — Latency percentiles (p50/p95/p99), distribution charts
+- **v0.2** — Latency percentiles (p50/p95/p99), error grouping, distribution histogram ✅
 - **v0.3** — JSON-driven configuration, multi-endpoint suites (schema v1 sketched in [`schemas/v1/config.schema.json`](./schemas/v1/config.schema.json); see [versioning policy](./schemas/README.md))
 - **v0.4** — Scenario chains, auth helpers, variable extraction
 - **v0.5** — JSON / Markdown / HTML reporting, CI integration
