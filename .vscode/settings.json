@@ -1,0 +1,55 @@
+{
+  "files.eol": "\n",
+  "files.insertFinalNewline": true,
+  "files.trimTrailingWhitespace": true,
+
+  "[go]": {
+    "editor.insertSpaces": false,
+    "editor.tabSize": 4,
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "golang.go",
+    "editor.codeActionsOnSave": {
+      "source.organizeImports": "explicit"
+    }
+  },
+  "[json]": {
+    "editor.tabSize": 2,
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "vscode.json-language-features"
+  },
+  "[jsonc]": {
+    "editor.tabSize": 2,
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "vscode.json-language-features"
+  },
+  "[yaml]": {
+    "editor.tabSize": 2,
+    "editor.formatOnSave": true
+  },
+  "[markdown]": {
+    "editor.tabSize": 2,
+    "files.trimTrailingWhitespace": false
+  },
+  "[makefile]": {
+    "editor.insertSpaces": false,
+    "editor.tabSize": 4
+  },
+
+  "go.useLanguageServer": true,
+  "go.lintTool": "staticcheck",
+  "go.lintOnSave": "package",
+  "go.vetOnSave": "package",
+  "go.formatTool": "gofmt",
+  "go.formatFlags": ["-s"],
+
+  "json.schemas": [
+    {
+      "fileMatch": [
+        "rkload.config.json",
+        "**/*.rkload.json",
+        "docs/examples/basic.config.json"
+      ],
+      "url": "./schemas/v1/config.schema.json"
+    }
+  ]
+}

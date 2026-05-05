@@ -1,0 +1,44 @@
+{
+  "tab_size": 2,
+  "hard_tabs": false,
+  "ensure_final_newline_on_save": true,
+  "remove_trailing_whitespace_on_save": true,
+  "format_on_save": "on",
+
+  "languages": {
+    "Go": {
+      "tab_size": 4,
+      "hard_tabs": true,
+      "format_on_save": "on",
+      "formatter": "language_server",
+      "code_actions_on_format": {
+        "source.organizeImports": true
+      }
+    },
+    "JSON": {
+      "tab_size": 2,
+      "format_on_save": "on"
+    },
+    "JSONC": {
+      "tab_size": 2,
+      "format_on_save": "on"
+    },
+    "YAML": {
+      "tab_size": 2,
+      "format_on_save": "on"
+    },
+    "Markdown": {
+      "tab_size": 2,
+      "remove_trailing_whitespace_on_save": false
+    }
+  },
+
+  "lsp": {
+    "gopls": {
+      "initialization_options": {
+        "usePlaceholders": true,
+        "staticcheck": true
+      }
+    }
+  }
+}

@@ -22,10 +22,17 @@ go.work.sum
 
 # Editor / IDE
 .idea/
-.vscode/
 *.swp
 *.swo
 *~
+
+# .vscode/ holds shared workspace config (settings, extensions, etc.) and
+# should be committed; ignore per-user state only.
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
 
 # OS
 .DS_Store
