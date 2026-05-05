@@ -1,0 +1,59 @@
+# Example rkload configuration file
+# NOTE: YAML config support arrives in v0.3.0. This file is a sketch of the
+# planned schema and is NOT yet consumed by the binary.
+#
+# The shape will evolve based on real usage. Expect breaking changes before v1.0.
+
+version: 1
+
+# Global defaults applied to all endpoints unless overridden.
+defaults:
+  concurrency: 50
+  requests: 1000
+  timeout: 30s
+  headers:
+    User-Agent: "rkload/0.3"
+
+# Individual endpoints to test.
+endpoints:
+  - name: root
+    url: https://api.example.com/
+    method: GET
+
+  - name: health
+    url: https://api.example.com/health
+    method: GET
+    # Override the global concurrency for this endpoint
+    concurrency: 10
+    requests: 100
+
+# Scenarios — multi-step request chains. (v0.4.0)
+# Variables captured from a step can be injected into subsequent steps.
+scenarios:
+  - name: document-flow
+    steps:
+      - name: login
+        method: POST
+        url: https://api.example.com/auth/login
+        body: '{"email": "{{ env.TEST_EMAIL }}", "password": "{{ env.TEST_PASSWORD }}"}'
+        capture:
+          token: jsonpath:$.access_token
+
+      - name: upload
+        method: POST
+        url: https://api.example.com/documents
+        headers:
+          Authorization: "Bearer {{ token }}"
+        body: '{"title": "load test doc"}'
+        capture:
+          doc_id: jsonpath:$.id
+        assert:
+          - status: 201
+
+      - name: fetch
+        method: GET
+        url: https://api.example.com/documents/{{ doc_id }}
+        headers:
+          Authorization: "Bearer {{ token }}"
+        assert:
+          - status: 200
