@@ -41,6 +41,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stale YAML config sketch (`docs/examples/basic.yaml.example`); will be
   re-introduced as JSON when scenarios land in v0.4.0
 
+## [0.3.2] - TBD
+
+### Added
+- `internal/importer.Postman(io.Reader, PostmanOptions) (*config.Config, error)`
+  for Postman Collection v2.1. Folder nesting flattened, collection
+  `variable[]` substituted into `{{var}}` references, custom
+  `UnmarshalJSON` on the URL field handles both string and object
+  shapes
+- `rkload import postman <collection>` subcommand mirroring the
+  openapi handler, plus a repeatable `--var key=value` flag for
+  user-supplied variable overrides (overrides win over collection
+  vars; unknown vars pass through verbatim so they're greppable)
+- Tiny `repeatableFlag` helper (custom `flag.Value`) so `--var` can
+  appear multiple times — stdlib has no `StringSlice` equivalent
+
+### Limitations
+- Only `body.mode: "raw"` is extracted; formdata / urlencoded / file
+  modes silently produce empty bodies (would require richer
+  `Endpoint` body support)
+- Collection schema URL must contain `v2.1`; v2.0 collections are
+  rejected with a clear error
+
 ## [0.3.1] - TBD
 
 ### Added
@@ -123,7 +145,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - HTTP status code histogram with bar chart
 - Worker pool architecture with bounded concurrency
 
-[Unreleased]: https://github.com/RKInnovate/rkload/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/RKInnovate/rkload/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/RKInnovate/rkload/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/RKInnovate/rkload/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/RKInnovate/rkload/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/RKInnovate/rkload/compare/v0.1.0...v0.2.0

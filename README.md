@@ -143,6 +143,12 @@ If you already have an OpenAPI 3.x, Swagger 2.0, or (next release) Postman Colle
 # OpenAPI 3.x or Swagger 2.0 (JSON or YAML, auto-detected)
 rkload import openapi spec.yaml -o rkload.config.json
 
+# Postman Collection v2.1
+rkload import postman collection.json -o rkload.config.json
+
+# Substitute Postman {{vars}} at generation time (repeatable flag)
+rkload import postman --var baseUrl=https://prod.example.com --var token=t collection.json -o rkload.config.json
+
 # Filter to a single tag or path subtree
 rkload import openapi --tag billing spec.yaml -o billing.config.json
 rkload import openapi --path-prefix /api/v1/ spec.yaml -o v1.config.json
@@ -172,7 +178,7 @@ Output is deterministic — re-running the importer on the same spec produces a 
 - **v0.2** — Latency percentiles (p50/p95/p99), error grouping, distribution histogram ✅
 - **v0.3** — JSON-driven configuration, multi-endpoint suites ✅ (schema v1 in [`schemas/v1/config.schema.json`](./schemas/v1/config.schema.json); see [versioning policy](./schemas/README.md))
 - **v0.3.1** — `rkload import openapi <spec>` to generate configs from OpenAPI / Swagger ✅
-- **v0.3.2** — `rkload import postman <collection>` for Postman Collection v2.1
+- **v0.3.2** — `rkload import postman <collection>` for Postman Collection v2.1 ✅
 - **v0.4** — Scenario chains, auth helpers, variable extraction
 - **v0.5** — JSON / Markdown / HTML reporting, CI integration
 - **v1.0** — Stable, documented, production-ready

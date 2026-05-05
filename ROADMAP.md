@@ -63,13 +63,17 @@ Generate rkload configs from existing API specifications so teams with OpenAPI s
 
 ---
 
-## v0.3.2 — Postman import
+## v0.3.2 — Postman import ✅
 
-- [ ] `rkload import postman <collection>` subcommand
-- [ ] Postman Collection v2.1 support
-- [ ] Map `item[].request` → endpoints (method, URL, headers, body)
-- [ ] Translate Postman `{{var}}` references to the env interpolation that ships in v0.3.0
-- [ ] Same filter / defaults flags as the OpenAPI importer
+- [x] `rkload import postman <collection>` subcommand
+- [x] Postman Collection v2.1 support
+- [x] Map `item[].request` → endpoints (method, URL, headers, body)
+- [x] Folder flattening — nested `item[].item[]` produces a flat config
+- [x] `{{var}}` substitution from collection-level `variable[]`
+- [x] `--var key=value` (repeatable) for user-supplied overrides
+- [x] Disabled headers dropped (matches Postman's own send behaviour)
+- [x] Same defaults / `--path-prefix` flags as the OpenAPI importer
+- [x] Raw body mode supported; formdata / urlencoded / file out of scope
 
 ---
 

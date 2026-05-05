@@ -235,9 +235,54 @@ matters when you commit the generated config and review changes
 under `git diff` — the diff only shows real spec changes, not
 iteration-order noise.
 
+## Importing Postman Collections
+
+For teams that already maintain API collections in Postman, the
+v2.1 Collection format imports the same way:
+
+```bash
+rkload import postman collection.json -o rkload.config.json
+
+# Substitute Postman {{vars}} at generation time
+rkload import postman --var baseUrl=https://prod.example.com \
+                     --var token=eyJhbGc...                  \
+                     collection.json -o rkload.config.json
+```
+
+### Flags
+
+| Flag             | Default        | Description                                                              |
+|------------------|----------------|--------------------------------------------------------------------------|
+| `-o`             | _(stdout)_     | Output file                                                              |
+| `-c`             | `0`            | Default concurrency (`0` = config default `10`)                          |
+| `-n`             | `0`            | Default request count (`0` = config default `100`)                       |
+| `-timeout`       | `""`           | Default timeout (`""` = config default `30s`)                            |
+| `--path-prefix`  | _(none)_       | Include only endpoints whose URL contains this substring                 |
+| `--var`          | _(none)_       | Override a Postman `{{var}}`. Repeatable: `--var k1=v1 --var k2=v2`      |
+
+### Mapping rules
+
+- **Folder flattening.** Nested `item[].item[]` produces a flat
+  config — folder structure is preserved only in endpoint names,
+  not in the output shape.
+- **Variables.** `{{var}}` references are first resolved against
+  the collection's own `variable[]` array, then user `--var`
+  overrides are layered on top. Unknown variables pass through
+  verbatim so you can grep them and decide.
+- **URL.** Postman's URL field is dual-shaped (string OR object
+  with `raw`/`host`/`path`); both forms are normalised. The `raw`
+  field wins when present.
+- **Headers.** `header[].disabled: true` entries are dropped to
+  match Postman's own send behaviour. Header values run through
+  variable substitution too.
+- **Body.** Only `body.mode: "raw"` is extracted (the common case
+  for JSON APIs). `formdata` / `urlencoded` / `file` modes
+  silently produce an empty body — write those by hand.
+- **Schema version.** Only Collection v2.1 is supported; v2.0 is
+  rejected with a clear error.
+
 ## Coming soon
 
-- **v0.3.2** — `rkload import postman <collection>` for Postman Collection v2.1
 - **v0.4.0** — Multi-step scenarios with auth chains
 - **v0.5.0** — `-output json` / Markdown / HTML for machine-readable results and CI integration
 

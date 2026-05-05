@@ -35,8 +35,7 @@ internal/report/percentile.go   min/max/p50/p95/p99/stddev (nearest-rank)
 internal/report/errorclass.go   ErrorClass + Classify (timeout/conn refused/DNS/TLS/other)
 internal/report/distribution.go Bucket + linear histogram between min and max
 internal/config/                Config, Endpoint, Load, Validate, Groups — schema v1
-internal/importer/              OpenAPI 3.x + Swagger 2.0 → *config.Config
-                                (Postman v2.1 lands in v0.3.2)
+internal/importer/              OpenAPI 3.x + Swagger 2.0 + Postman v2.1 → *config.Config
 schemas/vN/                     published JSON Schemas, immutable per version
 docs/examples/                  worked example configs
 ```
