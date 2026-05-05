@@ -17,6 +17,8 @@ import (
 	"sort"
 	"strings"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/RKInnovate/rkload/internal/config"
 )
 
@@ -40,16 +42,23 @@ type OpenAPIOptions struct {
 	PathPrefix         string // include only paths starting with this prefix (empty = no filter)
 }
 
-// OpenAPI converts an OpenAPI 3.x or Swagger 2.0 spec (JSON) into a
-// rkload Config. The spec dialect is auto-detected by inspecting the
-// top-level "openapi" or "swagger" key, so callers don't need to know
-// which they're handing in.
+// OpenAPI converts an OpenAPI 3.x or Swagger 2.0 spec (JSON or YAML)
+// into a rkload Config. Format and dialect are both auto-detected:
+// YAML inputs are converted to JSON in-memory before parsing, so the
+// downstream parsers only ever see canonical JSON.
 func OpenAPI(r io.Reader, opts OpenAPIOptions) (*config.Config, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return nil, fmt.Errorf("importer: reading spec: %w", err)
 	}
 	opts.fillDefaults()
+
+	if !looksLikeJSON(data) {
+		data, err = yamlToJSON(data)
+		if err != nil {
+			return nil, fmt.Errorf("importer: parsing YAML spec: %w", err)
+		}
+	}
 
 	dialect, err := detectDialect(data)
 	if err != nil {
@@ -202,4 +211,32 @@ func contains(xs []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// looksLikeJSON peeks at the first non-whitespace byte to decide whether
+// to treat the input as JSON or YAML. Cheaper and more robust than file-
+// extension sniffing — users sometimes pipe specs through stdin.
+func looksLikeJSON(data []byte) bool {
+	for _, b := range data {
+		switch b {
+		case ' ', '\t', '\n', '\r':
+			continue
+		case '{', '[':
+			return true
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+// yamlToJSON parses YAML and re-encodes as JSON. The two-pass approach
+// keeps every spec struct in importer/ tagged with json: only — yaml.v3
+// is used purely to canonicalise the input.
+func yamlToJSON(data []byte) ([]byte, error) {
+	var generic interface{}
+	if err := yaml.Unmarshal(data, &generic); err != nil {
+		return nil, err
+	}
+	return json.Marshal(generic)
 }

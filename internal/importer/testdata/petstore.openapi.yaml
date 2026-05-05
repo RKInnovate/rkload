@@ -1,0 +1,27 @@
+openapi: 3.0.3
+info:
+  title: Petstore
+  version: "1.0"
+servers:
+  - url: https://petstore.example.com/v1
+security:
+  - bearerAuth: []
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      tags: [pets]
+    post:
+      operationId: createPet
+      tags: [pets]
+      requestBody:
+        content:
+          application/json:
+            example:
+              name: Whiskers
+              tag: cat
+  /pets/{petId}:
+    get:
+      operationId: getPet
+      tags: [pets]
+      security: []

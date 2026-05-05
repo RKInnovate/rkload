@@ -220,6 +220,7 @@ func TestDetectDialect_NotJSON(t *testing.T) {
 func TestImportedConfigPassesValidation(t *testing.T) {
 	cases := []string{
 		"testdata/petstore.openapi.json",
+		"testdata/petstore.openapi.yaml",
 		"testdata/petstore.swagger.json",
 	}
 	for _, path := range cases {
@@ -229,5 +230,46 @@ func TestImportedConfigPassesValidation(t *testing.T) {
 				t.Errorf("imported config fails Validate: %v", err)
 			}
 		})
+	}
+}
+
+// ---- YAML support --------------------------------------------------------
+
+func TestOpenAPI3_YAMLProducesSameShapeAsJSON(t *testing.T) {
+	jsonCfg := loadFixture(t, "testdata/petstore.openapi.json")
+	yamlCfg := loadFixture(t, "testdata/petstore.openapi.yaml")
+
+	// The YAML fixture has /pets, /pets/{petId} (no /admin/stats), so
+	// counts differ — but it should still parse cleanly into the same
+	// schema-valid Config shape.
+	if yamlCfg.Schema != jsonCfg.Schema || yamlCfg.Version != jsonCfg.Version {
+		t.Errorf("YAML produced different schema/version than JSON: %+v vs %+v",
+			yamlCfg, jsonCfg)
+	}
+	if len(yamlCfg.GET) != 2 || len(yamlCfg.POST) != 1 {
+		t.Errorf("YAML group sizes: GET=%d POST=%d, want 2/1", len(yamlCfg.GET), len(yamlCfg.POST))
+	}
+	post := yamlCfg.POST[0]
+	if post.Name != "createPet" || !strings.Contains(post.Body, "Whiskers") {
+		t.Errorf("YAML POST mapping wrong: %+v", post)
+	}
+}
+
+func TestLooksLikeJSON(t *testing.T) {
+	cases := []struct {
+		in   string
+		json bool
+	}{
+		{`{"a":1}`, true},
+		{"  \n\t{ }", true},
+		{`["a"]`, true},
+		{"openapi: 3.0.0\n", false},
+		{"---\nfoo: bar\n", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := looksLikeJSON([]byte(c.in)); got != c.json {
+			t.Errorf("looksLikeJSON(%q) = %v, want %v", c.in, got, c.json)
+		}
 	}
 }
