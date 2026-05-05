@@ -6,7 +6,9 @@
 package loader
 
 import (
+	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -18,6 +20,12 @@ type Options struct {
 	Concurrency int
 	Requests    int
 	Timeout     time.Duration
+	// Headers are sent on every request. nil and empty are equivalent.
+	Headers map[string]string
+	// Body is the request payload sent verbatim. Empty means no body.
+	// A fresh io.Reader is created per request so the same Body string
+	// can be safely reused across all workers.
+	Body string
 }
 
 // Result is the outcome of a single HTTP request.
@@ -46,10 +54,17 @@ func Run(opts Options) []Result {
 			defer wg.Done()
 			client := &http.Client{Timeout: opts.Timeout}
 			for range jobs {
-				req, err := http.NewRequest(opts.Method, opts.URL, nil)
+				var body io.Reader
+				if opts.Body != "" {
+					body = strings.NewReader(opts.Body)
+				}
+				req, err := http.NewRequest(opts.Method, opts.URL, body)
 				if err != nil {
 					results <- Result{Err: err}
 					continue
+				}
+				for k, v := range opts.Headers {
+					req.Header.Set(k, v)
 				}
 				start := time.Now()
 				resp, err := client.Do(req)

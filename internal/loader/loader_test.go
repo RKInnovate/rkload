@@ -1,8 +1,10 @@
 package loader
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -91,6 +93,72 @@ func TestRun_ConnectionErrors(t *testing.T) {
 		if r.Err == nil {
 			t.Errorf("result %d: expected error, got nil", i)
 		}
+	}
+}
+
+// TestRun_SendsHeadersAndBody verifies the loader actually applies
+// Options.Headers and Options.Body to outgoing requests — the contract
+// the v0.3.0 config loader will rely on.
+func TestRun_SendsHeadersAndBody(t *testing.T) {
+	const wantBody = `{"hello":"world"}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-Test"); got != "rk" {
+			t.Errorf("X-Test header = %q, want %q", got, "rk")
+		}
+		if got := r.Header.Get("Content-Type"); got != "application/json" {
+			t.Errorf("Content-Type = %q, want application/json", got)
+		}
+		body, _ := io.ReadAll(r.Body)
+		if string(body) != wantBody {
+			t.Errorf("body = %q, want %q", body, wantBody)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	results := Run(Options{
+		URL:         srv.URL,
+		Method:      "POST",
+		Concurrency: 2,
+		Requests:    4,
+		Timeout:     5 * time.Second,
+		Headers: map[string]string{
+			"X-Test":       "rk",
+			"Content-Type": "application/json",
+		},
+		Body: wantBody,
+	})
+
+	for i, r := range results {
+		if r.Err != nil {
+			t.Errorf("result %d: %v", i, r.Err)
+		}
+	}
+}
+
+// Reusing the same Body string across many workers must not cause
+// "stream consumed" failures — each request gets its own io.Reader.
+func TestRun_BodyReusedAcrossWorkers(t *testing.T) {
+	var bodyCount, mu = 0, sync.Mutex{}
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		if len(body) > 0 {
+			bodyCount++
+		}
+		mu.Unlock()
+	}))
+	defer srv.Close()
+
+	const n = 30
+	Run(Options{
+		URL: srv.URL, Method: "POST",
+		Concurrency: 5, Requests: n, Timeout: 5 * time.Second,
+		Body: "payload",
+	})
+
+	if bodyCount != n {
+		t.Errorf("server saw body on %d/%d requests", bodyCount, n)
 	}
 }
 
