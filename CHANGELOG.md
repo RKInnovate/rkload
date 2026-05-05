@@ -28,6 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   splitting `-coverprofile=coverage.out` and handing `.out` to `go test` as a
   package path
 
+### Changed (CI)
+- Test matrix reduced from Go 1.22+1.23 to Go 1.23 only (3 jobs instead of 6).
+  `go.mod` still declares 1.22 as the minimum so 1.22 users can install via
+  `go install`, but CI no longer verifies that path
+
+### Roadmap
+- Added v0.3.1 (OpenAPI / Swagger import) and v0.3.2 (Postman import) sections
+  for generating rkload configs from existing API specifications
+
 ### Removed
 - Stale YAML config sketch (`docs/examples/basic.yaml.example`); will be
   re-introduced as JSON when scenarios land in v0.4.0

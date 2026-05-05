@@ -41,6 +41,33 @@ Move beyond single-URL tests.
 - [ ] Per-endpoint request body
 - [ ] Per-endpoint concurrency, request count, and timeout overrides
 - [ ] URL-based schema versioning (`schemas/vN/...` immutable per version, see [`schemas/README.md`](./schemas/README.md))
+- [ ] `version` integer cross-checked against the `$schema` URL's `vN` segment
+
+---
+
+## v0.3.1 — OpenAPI / Swagger import
+
+Generate rkload configs from existing API specifications so teams with OpenAPI specs don't hand-write `rkload.json`.
+
+- [ ] `rkload import openapi <spec>` subcommand reading JSON or YAML
+- [ ] OpenAPI 3.0 / 3.1 support
+- [ ] Swagger 2.0 support (legacy but common)
+- [ ] Map `paths.{path}.{method}` → endpoint, with URL = `servers[].url` + path
+- [ ] `operationId` (fallback `summary`) → endpoint `name`
+- [ ] `requestBody.content."application/json".example` → endpoint `body`
+- [ ] Filter flags: `--tag`, `--path-prefix`, `--method` so a 200-endpoint spec doesn't load-test all of them
+- [ ] Defaults for `c` / `requests` / `timeout` from CLI flags so the generated file is immediately runnable
+- [ ] Auth headers emitted as `REPLACE_ME` placeholders (specs don't carry real tokens)
+
+---
+
+## v0.3.2 — Postman import
+
+- [ ] `rkload import postman <collection>` subcommand
+- [ ] Postman Collection v2.1 support
+- [ ] Map `item[].request` → endpoints (method, URL, headers, body)
+- [ ] Translate Postman `{{var}}` references to the env interpolation that ships in v0.3.0
+- [ ] Same filter / defaults flags as the OpenAPI importer
 
 ---
 

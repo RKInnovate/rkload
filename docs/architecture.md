@@ -39,13 +39,15 @@ The `internal/` directory restricts package visibility — only code within this
 
 ## Concurrency model
 
-rkload uses a fixed-size worker pool with a buffered job channel.
+`loader.Run` uses a fixed-size worker pool with a buffered job channel.
 
-1. The main goroutine fills a buffered `jobs` channel with N tokens (one per request) and closes it.
+1. `Run` fills a buffered `jobs` channel with N tokens (one per request) and closes it.
 2. C worker goroutines each loop `for range jobs`, draining the queue.
-3. Each worker performs an HTTP request and pushes a `result` onto the `results` channel.
-4. A separate goroutine waits on `wg.Wait()` and closes the `results` channel once all workers exit.
-5. The main goroutine reads from `results` until it is closed, then computes metrics.
+3. Each worker performs an HTTP request and pushes a `loader.Result` onto the `results` channel.
+4. A separate goroutine waits on `wg.Wait()` and closes `results` once all workers exit.
+5. `Run` reads from `results` until it is closed and returns the collected slice.
+
+Aggregation happens in a second phase via `report.Summarize` — keeping execution and analysis in separate phases means future output formats (JSON, Markdown, HTML) only need to consume `Summary`, not re-implement the engine. `report.Print` writes to an `io.Writer` for the same reason.
 
 This design provides:
 
