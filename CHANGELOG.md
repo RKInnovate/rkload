@@ -41,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stale YAML config sketch (`docs/examples/basic.yaml.example`); will be
   re-introduced as JSON when scenarios land in v0.4.0
 
-## [0.3.2] - TBD
+## [0.3.2] - 2026-05-05
 
 ### Added
 - `internal/importer.Postman(io.Reader, PostmanOptions) (*config.Config, error)`
@@ -63,7 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Collection schema URL must contain `v2.1`; v2.0 collections are
   rejected with a clear error
 
-## [0.3.1] - TBD
+## [0.3.1] - 2026-05-05
 
 ### Added
 - `internal/importer` package: `OpenAPI(io.Reader, OpenAPIOptions) (*config.Config, error)`
@@ -88,7 +88,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   separate handler before top-level flag parsing, so positional
   args after a subcommand don't trip the root flag set
 
-## [0.3.0] - TBD
+## [0.3.0] - 2026-05-05
 
 ### Added
 - `internal/config` package: `Load`, `Validate`, `Endpoint`, `Config`,
@@ -113,7 +113,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flow, behaviour-preserved) and `runFromConfig` (new). The "neither
   given" error message now lists both forms as examples
 
-## [0.2.0] - TBD
+## [0.2.0] - 2026-05-05
 
 ### Added
 - Latency percentiles (p50, p95, p99), min, max, and population standard
@@ -136,7 +136,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Latency output regrouped under a single "Latency:" block with `avg`,
   `min`, `max`, `p50`, `p95`, `p99`, `stddev` rows
 
-## [0.1.0] - TBD
+## [0.1.0] - 2026-05-05
 
 ### Added
 - Core HTTP load testing engine with goroutine-based concurrency
