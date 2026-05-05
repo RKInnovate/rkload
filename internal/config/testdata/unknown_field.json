@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "GET": [
+    { "url": "https://api.example.com/" }
+  ],
+  "TRACE": [
+    { "url": "https://api.example.com/" }
+  ]
+}

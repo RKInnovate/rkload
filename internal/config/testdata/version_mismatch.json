@@ -1,0 +1,7 @@
+{
+  "$schema": "https://raw.githubusercontent.com/RKInnovate/rkload/main/schemas/v2/config.schema.json",
+  "version": 1,
+  "GET": [
+    { "url": "https://api.example.com/" }
+  ]
+}
