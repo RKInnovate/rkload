@@ -31,17 +31,18 @@ Make the report tell a real story, not just an average.
 
 ---
 
-## v0.3.0 — Configuration
+## v0.3.0 — Configuration ✅
 
 Move beyond single-URL tests.
 
-- [ ] JSON config file support (schema v1, see [`schemas/v1/config.schema.json`](./schemas/v1/config.schema.json))
-- [ ] Multiple endpoints per run, grouped by HTTP method
-- [ ] Per-endpoint headers (Authorization, User-Agent, etc.)
-- [ ] Per-endpoint request body
-- [ ] Per-endpoint concurrency, request count, and timeout overrides
-- [ ] URL-based schema versioning (`schemas/vN/...` immutable per version, see [`schemas/README.md`](./schemas/README.md))
-- [ ] `version` integer cross-checked against the `$schema` URL's `vN` segment
+- [x] JSON config file support (schema v1, see [`schemas/v1/config.schema.json`](./schemas/v1/config.schema.json))
+- [x] Multiple endpoints per run, grouped by HTTP method
+- [x] Per-endpoint headers (Authorization, User-Agent, etc.)
+- [x] Per-endpoint request body
+- [x] Per-endpoint concurrency, request count, and timeout overrides
+- [x] URL-based schema versioning (`schemas/vN/...` immutable per version, see [`schemas/README.md`](./schemas/README.md))
+- [x] `version` integer cross-checked against the `$schema` URL's `vN` segment
+- [x] `-config <path>` CLI flag, mutually exclusive with `-url`
 
 ---
 

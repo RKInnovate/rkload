@@ -41,6 +41,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stale YAML config sketch (`docs/examples/basic.yaml.example`); will be
   re-introduced as JSON when scenarios land in v0.4.0
 
+## [0.3.0] - TBD
+
+### Added
+- `internal/config` package: `Load`, `Validate`, `Endpoint`, `Config`,
+  `Groups()`, defaults. Validates against schema v1, cross-checks the
+  `$schema` URL's `vN` segment against the `version` integer, and uses
+  `json.Decoder.DisallowUnknownFields` so typos and unsupported method
+  keys (e.g. `TRACE`) fail fast instead of being silently dropped
+- `loader.Options.Headers` and `loader.Options.Body`: per-request
+  headers and a body string the loader applies on every iteration
+  (a fresh `strings.NewReader` per request so the same body string
+  can drive hundreds of concurrent workers safely)
+- `-config <path>` CLI flag for multi-endpoint runs, mutually exclusive
+  with `-url`. Endpoints run sequentially per-method-group with
+  individual reports, plus an `=== Overall ===` aggregate. Exit code
+  remains 1 if any endpoint had any failed request — same CI semantic
+  as the existing `-url` path
+- testdata fixtures for valid configs, version-mismatch, and
+  unknown-field rejection
+
+### Changed
+- `cmd/rkload/main.go` factored into `runSingle` (existing `-url`
+  flow, behaviour-preserved) and `runFromConfig` (new). The "neither
+  given" error message now lists both forms as examples
+
 ## [0.2.0] - TBD
 
 ### Added
@@ -73,6 +98,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - HTTP status code histogram with bar chart
 - Worker pool architecture with bounded concurrency
 
-[Unreleased]: https://github.com/RKInnovate/rkload/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/RKInnovate/rkload/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/RKInnovate/rkload/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/RKInnovate/rkload/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/RKInnovate/rkload/releases/tag/v0.1.0

@@ -86,13 +86,52 @@ Latency distribution:
 
 ## Flags
 
-| Flag | Default | Description |
-|---|---|---|
-| `-url` | _(required)_ | Target URL to load test |
-| `-c` | `10` | Number of concurrent workers |
-| `-n` | `100` | Total number of requests |
-| `-method` | `GET` | HTTP method (GET, POST, PUT, DELETE, etc.) |
-| `-version` | `false` | Print version and exit |
+| Flag       | Default       | Description                                                          |
+|------------|---------------|----------------------------------------------------------------------|
+| `-url`     | _(required¹)_ | Target URL to load test (single-endpoint mode)                       |
+| `-config`  | _(required¹)_ | Path to a JSON config file (multi-endpoint mode, see below)          |
+| `-c`       | `10`          | Number of concurrent workers (single-endpoint mode)                  |
+| `-n`       | `100`         | Total number of requests (single-endpoint mode)                      |
+| `-method`  | `GET`         | HTTP method (single-endpoint mode)                                   |
+| `-version` | `false`       | Print version and exit                                               |
+
+¹ Exactly one of `-url` or `-config` is required.
+
+---
+
+## Multi-endpoint configs
+
+For testing more than one endpoint in a single run, use a JSON config file. The format is defined by the JSON Schema at [`schemas/v1/config.schema.json`](./schemas/v1/config.schema.json) — pin the schema URL via `$schema` and your editor will give you autocomplete and validation.
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/RKInnovate/rkload/main/schemas/v1/config.schema.json",
+  "version": 1,
+
+  "GET": [
+    { "name": "health", "url": "https://api.example.com/health", "c": 50, "requests": 200 }
+  ],
+  "POST": [
+    {
+      "name": "login",
+      "url": "https://api.example.com/auth/login",
+      "headers": { "Content-Type": "application/json" },
+      "body": "{\"email\":\"u@example.com\",\"password\":\"…\"}",
+      "c": 20,
+      "requests": 100,
+      "timeout": "5s"
+    }
+  ]
+}
+```
+
+```bash
+rkload -config rkload.config.json
+```
+
+Endpoints run **sequentially per group** so each gets its own clean per-endpoint report (latency, error breakdown, distribution histogram), followed by an `=== Overall ===` aggregate. The exit code is non-zero if any endpoint had any failed request — same CI semantic as the single-URL mode.
+
+See [`docs/examples/basic.config.json`](./docs/examples/basic.config.json) for a fuller example and [`schemas/README.md`](./schemas/README.md) for the schema versioning policy (each `vN/` is immutable once published — never modify a published schema in place).
 
 ---
 
@@ -101,7 +140,9 @@ Latency distribution:
 `rkload` is under active development. The current version is a focused MVP. See [ROADMAP.md](./ROADMAP.md) for the planned feature progression:
 
 - **v0.2** — Latency percentiles (p50/p95/p99), error grouping, distribution histogram ✅
-- **v0.3** — JSON-driven configuration, multi-endpoint suites (schema v1 sketched in [`schemas/v1/config.schema.json`](./schemas/v1/config.schema.json); see [versioning policy](./schemas/README.md))
+- **v0.3** — JSON-driven configuration, multi-endpoint suites ✅ (schema v1 in [`schemas/v1/config.schema.json`](./schemas/v1/config.schema.json); see [versioning policy](./schemas/README.md))
+- **v0.3.1** — `rkload import openapi <spec>` to generate configs from OpenAPI / Swagger
+- **v0.3.2** — `rkload import postman <collection>` for Postman Collection v2.1
 - **v0.4** — Scenario chains, auth helpers, variable extraction
 - **v0.5** — JSON / Markdown / HTML reporting, CI integration
 - **v1.0** — Stable, documented, production-ready

@@ -27,13 +27,13 @@ CI (`.github/workflows/ci.yml`) runs the test/vet/build matrix on Go 1.22 and 1.
 ### Layout
 
 ```
-cmd/rkload/                     flag parsing + orchestration only
-internal/loader/                Options, Result, Run — worker pool + HTTP execution
+cmd/rkload/                     flag parsing + runSingle (-url) + runFromConfig (-config)
+internal/loader/                Options (incl. Headers + Body), Result, Run
 internal/report/                Summary, Summarize, Print — aggregation + rendering
 internal/report/percentile.go   min/max/p50/p95/p99/stddev (nearest-rank)
 internal/report/errorclass.go   ErrorClass + Classify (timeout/conn refused/DNS/TLS/other)
 internal/report/distribution.go Bucket + linear histogram between min and max
-internal/config/                JSON config (planned for v0.3.0; schema in schemas/v1/)
+internal/config/                Config, Endpoint, Load, Validate, Groups — schema v1
 schemas/vN/                     published JSON Schemas, immutable per version
 docs/examples/                  worked example configs
 ```

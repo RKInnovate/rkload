@@ -10,13 +10,16 @@ This sends 1000 GET requests using 50 concurrent workers.
 
 ## Flags
 
-| Flag | Default | Description |
-|---|---|---|
-| `-url` | _(required)_ | Target URL |
-| `-c` | `10` | Number of concurrent workers |
-| `-n` | `100` | Total number of requests |
-| `-method` | `GET` | HTTP method |
-| `-version` | `false` | Print version and exit |
+| Flag       | Default       | Description                                                     |
+|------------|---------------|-----------------------------------------------------------------|
+| `-url`     | _(required¹)_ | Target URL (single-endpoint mode)                               |
+| `-config`  | _(required¹)_ | Path to a JSON config (multi-endpoint mode, see below)          |
+| `-c`       | `10`          | Number of concurrent workers (single-endpoint mode)             |
+| `-n`       | `100`         | Total number of requests (single-endpoint mode)                 |
+| `-method`  | `GET`         | HTTP method (single-endpoint mode)                              |
+| `-version` | `false`       | Print version and exit                                          |
+
+¹ Exactly one of `-url` or `-config` is required.
 
 ## Reading the output
 
@@ -108,11 +111,63 @@ Establishes a steady-state throughput number you can track over time.
 - For cloud autoscaled services, run a "warmup" test first, then your real measurement.
 - Consider whether you actually want to test the root or health endpoint, or your real API workflow. The latter requires scenarios (v0.4.0).
 
+## Multi-endpoint configs
+
+For more than one endpoint, write a JSON config file. The format is defined by
+[`schemas/v1/config.schema.json`](../schemas/v1/config.schema.json); pin the
+schema URL via `$schema` and your editor handles autocomplete and validation.
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/RKInnovate/rkload/main/schemas/v1/config.schema.json",
+  "version": 1,
+  "GET": [
+    { "name": "health", "url": "https://api.example.com/health", "c": 50, "requests": 200 }
+  ],
+  "POST": [
+    {
+      "name": "login",
+      "url": "https://api.example.com/auth/login",
+      "headers": { "Content-Type": "application/json" },
+      "body": "{\"email\":\"u@example.com\"}",
+      "c": 20,
+      "requests": 100,
+      "timeout": "5s"
+    }
+  ]
+}
+```
+
+```bash
+rkload -config rkload.config.json
+```
+
+Endpoints run sequentially per group; each gets its own per-endpoint report
+followed by an `=== Overall ===` aggregate. Worked example in
+[`docs/examples/basic.config.json`](./examples/basic.config.json); versioning
+policy (each `vN/` is immutable once published) in
+[`schemas/README.md`](../schemas/README.md).
+
+### Defaults
+
+If you omit `c`, `requests`, or `timeout` on an endpoint, the runtime fills
+in `10`, `100`, and `30s` respectively — same defaults as the JSON Schema, so
+the editor view and runtime view of a partially-specified endpoint match.
+
+### Validation
+
+Configs are rejected at load time (clean error, exit 1) for: missing
+`version`, version other than 1, `$schema` URL whose `vN` segment doesn't
+match `version`, missing `url`, non-`http(s)` scheme, malformed `timeout`,
+out-of-range `c`, name longer than 80 chars, and unknown top-level fields
+(catches typos like `TRACE` or method-name case mismatches).
+
 ## Coming soon
 
 The next versions will add:
 
-- **v0.3.0** — `-config rkload.json` for multi-endpoint suites (schema v1, see [`schemas/v1/config.schema.json`](../schemas/v1/config.schema.json) and the [example](./examples/basic.config.json); versioning policy in [`schemas/README.md`](../schemas/README.md))
+- **v0.3.1** — `rkload import openapi <spec>` to generate configs from OpenAPI / Swagger
+- **v0.3.2** — `rkload import postman <collection>` for Postman Collection v2.1
 - **v0.4.0** — Multi-step scenarios with auth chains
 - **v0.5.0** — `-output json` / Markdown / HTML for machine-readable results and CI integration
 
