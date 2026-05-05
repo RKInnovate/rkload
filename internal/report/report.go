@@ -17,34 +17,37 @@ import (
 
 // Summary is the aggregated outcome of a load run.
 type Summary struct {
-	Total       int
-	Successful  int
-	Errors      int
-	Elapsed     time.Duration
-	Throughput  float64
-	AvgLatency  time.Duration
-	MinLatency  time.Duration
-	MaxLatency  time.Duration
-	P50Latency  time.Duration
-	P95Latency  time.Duration
-	P99Latency  time.Duration
-	StdDev      time.Duration
-	StatusCodes map[int]int
+	Total         int
+	Successful    int
+	Errors        int
+	Elapsed       time.Duration
+	Throughput    float64
+	AvgLatency    time.Duration
+	MinLatency    time.Duration
+	MaxLatency    time.Duration
+	P50Latency    time.Duration
+	P95Latency    time.Duration
+	P99Latency    time.Duration
+	StdDev        time.Duration
+	StatusCodes   map[int]int
+	ErrorsByClass map[ErrorClass]int
 }
 
 // Summarize collapses results into a Summary. elapsed is the wall-clock
 // duration of the run, used for throughput.
 func Summarize(results []loader.Result, elapsed time.Duration) Summary {
 	s := Summary{
-		Total:       len(results),
-		Elapsed:     elapsed,
-		StatusCodes: make(map[int]int),
+		Total:         len(results),
+		Elapsed:       elapsed,
+		StatusCodes:   make(map[int]int),
+		ErrorsByClass: make(map[ErrorClass]int),
 	}
 
 	durations := make([]time.Duration, 0, len(results))
 	for _, r := range results {
 		if r.Err != nil {
 			s.Errors++
+			s.ErrorsByClass[Classify(r.Err)]++
 			continue
 		}
 		s.Successful++
@@ -76,6 +79,15 @@ func Print(w io.Writer, s Summary) {
 	fmt.Fprintf(w, "Errors:          %d\n", s.Errors)
 	fmt.Fprintf(w, "Total time:      %s\n", s.Elapsed.Round(time.Millisecond))
 	fmt.Fprintf(w, "Throughput:      %.2f req/sec\n", s.Throughput)
+
+	if s.Errors > 0 {
+		fmt.Fprintf(w, "\nErrors by class:\n")
+		for _, class := range classOrder {
+			if count := s.ErrorsByClass[class]; count > 0 {
+				fmt.Fprintf(w, "  %s: %d\n", class, count)
+			}
+		}
+	}
 
 	if s.Successful > 0 {
 		fmt.Fprintf(w, "\nLatency:\n")

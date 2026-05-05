@@ -72,6 +72,9 @@ func TestSummarize_AllErrors(t *testing.T) {
 	if s.AvgLatency != 0 {
 		t.Errorf("AvgLatency = %v, want 0 (no successes)", s.AvgLatency)
 	}
+	if got := s.ErrorsByClass[ClassOther]; got != 2 {
+		t.Errorf("ErrorsByClass[other] = %d, want 2", got)
+	}
 }
 
 func TestSummarize_EmptyElapsedNoThroughput(t *testing.T) {
@@ -123,7 +126,11 @@ func TestPrint_RendersExpectedFields(t *testing.T) {
 }
 
 func TestPrint_OmitsLatencyAndStatusWhenAllErrors(t *testing.T) {
-	s := Summary{Total: 5, Successful: 0, Errors: 5, Elapsed: time.Second, Throughput: 5.0}
+	s := Summary{
+		Total: 5, Successful: 0, Errors: 5,
+		Elapsed: time.Second, Throughput: 5.0,
+		ErrorsByClass: map[ErrorClass]int{ClassTimeout: 5},
+	}
 	var buf bytes.Buffer
 	Print(&buf, s)
 	out := buf.String()
@@ -133,5 +140,34 @@ func TestPrint_OmitsLatencyAndStatusWhenAllErrors(t *testing.T) {
 	}
 	if strings.Contains(out, "Status codes") {
 		t.Errorf("output should not mention Status codes when no successes:\n%s", out)
+	}
+}
+
+func TestPrint_RendersErrorsByClassInOrder(t *testing.T) {
+	s := Summary{
+		Total: 10, Successful: 0, Errors: 10,
+		Elapsed: time.Second, Throughput: 10.0,
+		ErrorsByClass: map[ErrorClass]int{
+			ClassTimeout: 4,
+			ClassDNS:     3,
+			ClassOther:   3,
+		},
+	}
+	var buf bytes.Buffer
+	Print(&buf, s)
+	out := buf.String()
+
+	for _, want := range []string{"timeout: 4", "DNS: 3", "other: 3"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q\n%s", want, out)
+		}
+	}
+
+	// Stable rendering order (timeout → conn refused → DNS → TLS → other).
+	timeoutIdx := strings.Index(out, "timeout: ")
+	dnsIdx := strings.Index(out, "DNS: ")
+	otherIdx := strings.Index(out, "other: ")
+	if !(timeoutIdx < dnsIdx && dnsIdx < otherIdx) {
+		t.Errorf("error classes not in stable order:\n%s", out)
 	}
 }
