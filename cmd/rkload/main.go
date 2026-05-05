@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/RKInnovate/rkload/internal/config"
@@ -272,8 +273,96 @@ func writeConfigJSON(cfg *config.Config, outPath string) int {
 	return 0
 }
 
-// importPostman is stubbed in this commit. Implementation lands with v0.3.2.
-func importPostman(_ []string) int {
-	fmt.Fprintln(os.Stderr, "rkload import postman: not implemented yet (lands in v0.3.2)")
-	return 1
+// importPostman parses a Postman Collection v2.1 and writes the
+// equivalent rkload Config. Folder structure is flattened.
+func importPostman(args []string) int {
+	fs := flag.NewFlagSet("rkload import postman", flag.ContinueOnError)
+	output := fs.String("o", "", "Output file (default: stdout)")
+	concurrency := fs.Int("c", 0, "Default concurrency for generated endpoints (0 = config default)")
+	requests := fs.Int("n", 0, "Default request count for generated endpoints (0 = config default)")
+	timeout := fs.String("timeout", "", "Default timeout for generated endpoints (empty = config default)")
+	pathPrefix := fs.String("path-prefix", "", "Include only endpoints whose URL contains this substring")
+	varsRaw := newRepeatableFlag(fs, "var", "Override a Postman {{var}} (repeatable, e.g. --var baseUrl=https://prod.x)")
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "Usage: rkload import postman <collection> [flags]")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Flags:")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+	if fs.NArg() != 1 {
+		fs.Usage()
+		return 1
+	}
+	colPath := fs.Arg(0)
+
+	in, err := os.Open(colPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer in.Close()
+
+	vars, err := parseVarFlags(*varsRaw)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+
+	cfg, err := importer.Postman(in, importer.PostmanOptions{
+		DefaultConcurrency: *concurrency,
+		DefaultRequests:    *requests,
+		DefaultTimeout:     *timeout,
+		PathPrefix:         *pathPrefix,
+		Vars:               vars,
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+
+	return writeConfigJSON(cfg, *output)
+}
+
+// repeatableFlag is a tiny implementation of a -var key=value flag
+// that may appear multiple times. flag.StringSlice doesn't exist in
+// the stdlib, so we plug a custom flag.Value that appends.
+type repeatableFlag struct{ values *[]string }
+
+func (r *repeatableFlag) String() string {
+	if r.values == nil {
+		return ""
+	}
+	return strings.Join(*r.values, ",")
+}
+
+func (r *repeatableFlag) Set(s string) error {
+	*r.values = append(*r.values, s)
+	return nil
+}
+
+func newRepeatableFlag(fs *flag.FlagSet, name, usage string) *[]string {
+	values := &[]string{}
+	fs.Var(&repeatableFlag{values: values}, name, usage)
+	return values
+}
+
+// parseVarFlags turns ["k1=v1", "k2=v2"] into map[string]string.
+// Errors clearly on malformed entries instead of silently dropping
+// them.
+func parseVarFlags(raw []string) (map[string]string, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]string, len(raw))
+	for _, kv := range raw {
+		eq := strings.IndexByte(kv, '=')
+		if eq <= 0 {
+			return nil, fmt.Errorf("--var %q: expected key=value form", kv)
+		}
+		out[kv[:eq]] = kv[eq+1:]
+	}
+	return out, nil
 }
