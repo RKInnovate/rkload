@@ -194,6 +194,31 @@ Output is deterministic — re-running the importer on the same spec produces a 
 
 ---
 
+## Development
+
+Common Make targets — these are the same commands CI runs, so passing them locally means CI will too:
+
+```bash
+make build              # build to ./bin/rkload
+make test               # go test -v -race -coverprofile=coverage.out ./...
+make vet                # go vet ./...
+make lint               # vet + staticcheck (auto-installs staticcheck on first run)
+make fmt                # gofmt -s -w .
+make run ARGS='-url https://example.com -c 10 -n 100'
+make release-snapshot   # local goreleaser dry-run
+```
+
+Run a single test:
+
+```bash
+go test -run TestRun_BoundsConcurrency ./internal/loader
+go test -run TestPostman ./internal/importer
+```
+
+Requirements: Go 1.22 or later, `make`. `staticcheck` and `goreleaser` are optional and auto-installed by their respective targets.
+
+---
+
 ## Responsible use
 
 `rkload` can generate significant traffic. Only test systems you own or have explicit written permission to test. Misuse may violate computer fraud and abuse laws in your jurisdiction. See [SECURITY.md](./SECURITY.md) for more.
