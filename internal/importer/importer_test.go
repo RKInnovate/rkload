@@ -184,6 +184,61 @@ func TestSwagger2_EmptyHostIsAnError(t *testing.T) {
 	}
 }
 
+// TestSwagger2_DefaultsHTTPSWhenSchemesOmitted: schemes is optional
+// in Swagger 2.0; rkload defaults to https rather than failing or
+// guessing, since most public APIs since 2018 are https-only.
+func TestSwagger2_DefaultsHTTPSWhenSchemesOmitted(t *testing.T) {
+	spec := `{
+		"swagger":"2.0",
+		"host":"api.example.com",
+		"basePath":"/v1",
+		"paths":{"/x":{"get":{"operationId":"getX"}}}
+	}`
+	cfg, err := OpenAPI(strings.NewReader(spec), OpenAPIOptions{})
+	if err != nil {
+		t.Fatalf("OpenAPI: %v", err)
+	}
+	if len(cfg.GET) != 1 {
+		t.Fatalf("GET count = %d, want 1", len(cfg.GET))
+	}
+	if !strings.HasPrefix(cfg.GET[0].URL, "https://") {
+		t.Errorf("URL = %q, want https:// default scheme", cfg.GET[0].URL)
+	}
+}
+
+// TestSwagger2_PerOpSecurityOverridesGlobal: per-op security:[] opts
+// the operation out of an otherwise-global auth requirement, mirroring
+// the OpenAPI 3.x behaviour. Without this, a public endpoint inside an
+// otherwise-authenticated API would inherit a stale REPLACE_ME header.
+func TestSwagger2_PerOpSecurityOverridesGlobal(t *testing.T) {
+	spec := `{
+		"swagger":"2.0",
+		"host":"api.example.com",
+		"schemes":["https"],
+		"security":[{"apiKey":[]}],
+		"paths":{
+			"/secured":{"get":{"operationId":"secured"}},
+			"/public":{"get":{"operationId":"public","security":[]}}
+		}
+	}`
+	cfg, err := OpenAPI(strings.NewReader(spec), OpenAPIOptions{})
+	if err != nil {
+		t.Fatalf("OpenAPI: %v", err)
+	}
+	for _, ep := range cfg.GET {
+		switch ep.Name {
+		case "secured":
+			if got := ep.Headers["Authorization"]; got != AuthPlaceholder {
+				t.Errorf("secured.Authorization = %q, want %q (global auth)", got, AuthPlaceholder)
+			}
+		case "public":
+			if got := ep.Headers["Authorization"]; got != "" {
+				t.Errorf("public should opt out of auth, got %q", got)
+			}
+		}
+	}
+}
+
 // ---- Format detection ----------------------------------------------------
 
 func TestDetectDialect_UnknownVersion(t *testing.T) {
