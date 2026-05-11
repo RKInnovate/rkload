@@ -34,8 +34,12 @@ func TestRun_AllSuccess(t *testing.T) {
 		if r.StatusCode != http.StatusOK {
 			t.Errorf("result %d: status = %d, want 200", i, r.StatusCode)
 		}
-		if r.Duration <= 0 {
-			t.Errorf("result %d: duration = %v, want > 0", i, r.Duration)
+		// Duration is allowed to be zero on Windows: the monotonic clock
+		// has ~15ms resolution by default, so fast localhost responses
+		// can register as 0ns. We only want to catch a genuinely broken
+		// clock (negative duration).
+		if r.Duration < 0 {
+			t.Errorf("result %d: duration = %v, want >= 0", i, r.Duration)
 		}
 	}
 }
