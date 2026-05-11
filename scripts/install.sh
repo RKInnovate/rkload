@@ -4,7 +4,7 @@
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/RKInnovate/rkload/main/scripts/install.sh | sh
 #   ./scripts/install.sh                          # from a clone
-#   ./scripts/install.sh --version v0.3.3         # pin a specific tag
+#   ./scripts/install.sh --version v1.0.0         # pin a specific tag
 #   ./scripts/install.sh --dir ~/.local/bin       # install elsewhere
 #
 # The script picks an install directory in this order:

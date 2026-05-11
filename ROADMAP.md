@@ -6,107 +6,51 @@ Items here are aspirational, not commitments. Priorities shift based on real usa
 
 ---
 
-## v0.1.0 — Core engine ✅
+## v1.0.0 — First release ✅
 
-The minimum viable load tester.
+Everything below shipped as the inaugural published release. Earlier version numbers (v0.1.0 – v0.3.4) existed as development markers in the local git history but were never built into GitHub Releases.
 
-- [x] Goroutine-based concurrent HTTP load generation
-- [x] Bounded worker pool via buffered channels
-- [x] CLI flags for URL, concurrency, request count, method
-- [x] Aggregate metrics: total time, throughput, average latency
-- [x] HTTP status code histogram
+### Engine
+- [x] Goroutine-based concurrent HTTP load generation with a bounded worker pool
+- [x] CLI flags: `-url`, `-c`, `-n`, `-method`, `-version`, `-config`, `-help`
+- [x] Aggregate metrics: total time, throughput, average latency, status-code histogram
 
----
-
-## v0.2.0 — Better metrics ✅
-
-Make the report tell a real story, not just an average.
-
-- [x] p50 / p95 / p99 latency percentiles
-- [x] Min / max latency
-- [x] Standard deviation
+### Reporting
+- [x] p50 / p95 / p99 latency percentiles, min, max, population standard deviation
 - [x] Failed request grouping by error class (timeout / connection refused / DNS / TLS / other)
-- [x] Linear-bucketed latency distribution histogram
-- [x] Engine extracted to `internal/loader`, reporting to `internal/report`
+- [x] Linear-bucketed ASCII latency distribution histogram
+
+### Multi-endpoint configuration (schema v1)
+- [x] JSON config file ([`schemas/v1/config.schema.json`](./schemas/v1/config.schema.json)) with strict `additionalProperties: false`
+- [x] URL-based schema versioning (`schemas/vN/...` immutable per version, [`schemas/README.md`](./schemas/README.md))
+- [x] Per-endpoint `name`, `headers`, `body`, `c`, `requests`, `timeout` overrides
+- [x] `-config <path>` flag, sequential per-method-group runs with per-endpoint reports and an `=== Overall ===` aggregate
+
+### Spec import
+- [x] `rkload import openapi <spec>` for OpenAPI 3.x and Swagger 2.0 (JSON or YAML, auto-detected)
+- [x] `--server-url` / `--server-index` to override the spec's base URL
+- [x] `--tag` and `--path-prefix` filters
+- [x] `rkload import postman <collection>` for Postman Collection v2.1 with folder flattening, `{{var}}` substitution, and repeatable `--var key=value`
+- [x] Deterministic output (paths sorted lexically, methods in fixed order)
+
+### Scaffolding & validation
+- [x] `rkload init [path] [--force]` writes a starter config so users without an OpenAPI / Postman input can begin from a working file
+- [x] `rkload validate <config>` with a canonical-JSON content-hash cache at `~/.rkload/cache/`
+- [x] Cache-aware `-config` run flow that skips redundant re-validation; cache write failures are reported inline without failing the run
+
+### Self-update
+- [x] `rkload update` subcommand: GitHub Releases API discovery (with redirect fallback), SHA-256 verification against `checksums.txt`, atomic in-place replacement
+- [x] `--check` (report only), `--version vX.Y.Z` (pin / downgrade), `--force` (reinstall when current)
+- [x] Daily background "update available" notice on startup; opt out via `RKLOAD_NO_UPDATE_CHECK=1` or non-tty stdout
+
+### Tooling
+- [x] One-line installers (`scripts/install.sh`, `scripts/install.ps1`) that fetch the matching release archive and put `rkload` on `PATH`
+- [x] GoReleaser config for cross-platform binary releases on tag push
+- [x] CI matrix across Linux / macOS / Windows with vet, staticcheck, race-mode tests
 
 ---
 
-## v0.3.0 — Configuration ✅
-
-Move beyond single-URL tests.
-
-- [x] JSON config file support (schema v1, see [`schemas/v1/config.schema.json`](./schemas/v1/config.schema.json))
-- [x] Multiple endpoints per run, grouped by HTTP method
-- [x] Per-endpoint headers (Authorization, User-Agent, etc.)
-- [x] Per-endpoint request body
-- [x] Per-endpoint concurrency, request count, and timeout overrides
-- [x] URL-based schema versioning (`schemas/vN/...` immutable per version, see [`schemas/README.md`](./schemas/README.md))
-- [x] `version` integer cross-checked against the `$schema` URL's `vN` segment
-- [x] `-config <path>` CLI flag, mutually exclusive with `-url`
-
----
-
-## v0.3.1 — OpenAPI / Swagger import ✅
-
-Generate rkload configs from existing API specifications so teams with OpenAPI specs don't hand-write `rkload.json`.
-
-- [x] `rkload import openapi <spec>` subcommand reading JSON or YAML
-- [x] OpenAPI 3.x support
-- [x] Swagger 2.0 support (legacy but common)
-- [x] Map `paths.{path}.{method}` → endpoint, with URL = `servers[].url` (or schemes/host/basePath for Swagger 2) + path
-- [x] `operationId` → endpoint `name` (falls back to `method-path-with-dashes`)
-- [x] `requestBody.content."application/json".example` (OpenAPI 3) and `parameters[in=body].x-example`/`example` (Swagger 2) → endpoint `body`
-- [x] Filter flags: `--tag`, `--path-prefix`
-- [x] Defaults for `c` / `requests` / `timeout` from CLI flags so the generated file is immediately runnable
-- [x] Auth headers emitted as `REPLACE_ME` placeholders (specs don't carry real tokens)
-- [x] Deterministic output (paths sorted lexically, methods in fixed order) so re-runs produce byte-identical files
-
----
-
-## v0.3.2 — Postman import ✅
-
-- [x] `rkload import postman <collection>` subcommand
-- [x] Postman Collection v2.1 support
-- [x] Map `item[].request` → endpoints (method, URL, headers, body)
-- [x] Folder flattening — nested `item[].item[]` produces a flat config
-- [x] `{{var}}` substitution from collection-level `variable[]`
-- [x] `--var key=value` (repeatable) for user-supplied overrides
-- [x] Disabled headers dropped (matches Postman's own send behaviour)
-- [x] Same defaults / `--path-prefix` flags as the OpenAPI importer
-- [x] Raw body mode supported; formdata / urlencoded / file out of scope
-
----
-
-## v0.3.3 — Validate subcommand ✅
-
-A standalone validation step that doubles as a record-keeping cache, so large configs don't re-validate on every run.
-
-- [x] `rkload validate <config>` subcommand prints a one-screen summary (path, canonical hash, file size, schema URL/version, per-method endpoint counts) and returns non-zero on any validation failure
-- [x] `internal/cache` package storing `~/.rkload/cache/<sha256>.json` entries keyed by canonical JSON hash (sorted-key, whitespace-invariant)
-- [x] `--no-cache` flag on `validate` to skip both read and write — useful in CI
-- [x] `RKLOAD_CACHE_DIR` environment variable to redirect the cache (per-project isolation, sandboxed tests)
-- [x] `-config` run flow consults the cache automatically: hash hit + rkload-version match skips re-validation; miss / mismatch re-validates and refreshes the entry
-- [x] Cache write failures reported inline, never fatal — validation succeeded; only the bookkeeping didn't
-- [x] `config.Parse` + exported `Config.ApplyDefaults` so the CLI can split parse-from-validate around the cache lookup
-- [x] `rkload init [path] [--force]` subcommand that writes a starter config so users without an OpenAPI / Postman input can start from a working file
-- [x] One-line installers (`scripts/install.sh`, `scripts/install.ps1`) so users without a Go toolchain can pull the matching release archive and get `rkload` onto their PATH
-- [x] `--server-url` / `--server-index` on `rkload import openapi` so specs that list a dev server first (the common FastAPI pattern) don't force users to hand-edit every URL after import
-
----
-
-## v0.3.4 — Self-update ✅
-
-Keep installed rkload binaries current without re-running the install script.
-
-- [x] `rkload update` subcommand: discovers latest release via GitHub API (with redirect fallback for rate-limited callers), downloads the GoReleaser archive matching the host's GOOS/GOARCH, verifies SHA-256 against the published `checksums.txt`, atomically replaces the running binary
-- [x] Cross-platform replace: Unix `os.Rename` + Windows `<path>.old` shuffle (running .exe can't be overwritten but can be renamed)
-- [x] `--check` (report only, no install), `--version vX.Y.Z` (pin / downgrade), `--force` (reinstall even when current)
-- [x] Daily background "update available" notice on startup. Silent on every failure; skipped for non-tty stdout, dev builds, and `RKLOAD_NO_UPDATE_CHECK=1`. State persists at `~/.rkload/update.json` so the second invocation within 24h doesn't touch the network
-- [x] `internal/updater` package fully unit-tested against an `httptest` GitHub stand-in — no live network calls in CI
-
----
-
-## v0.4.0 — Scenarios
+## v1.1.0 — Scenarios
 
 The feature that justifies the name "scenario-driven."
 
@@ -118,7 +62,7 @@ The feature that justifies the name "scenario-driven."
 
 ---
 
-## v0.5.0 — Reporting & integration
+## v1.2.0 — Reporting & integration
 
 Make rkload useful in CI and team workflows.
 
@@ -130,19 +74,24 @@ Make rkload useful in CI and team workflows.
 
 ---
 
-## v1.0.0 — Stable
+## Future hardening
 
-The contract for a 1.0:
+Targets that aren't tied to a specific release yet:
 
-- [ ] Comprehensive test coverage (≥80%)
-- [ ] Stable public API surface
-- [ ] Documentation site
+- [ ] Documentation site (separate from README)
 - [ ] Performance benchmarks vs comparable tools
-- [ ] Production usage at multiple organizations
+- [ ] Schema-based example body synthesis in `rkload import openapi` (so specs with `$ref`-only `requestBody` produce non-empty bodies)
+- [ ] `--auth-header NAME:VALUE` on importers so specs without declared `security` still get auth injected
 
 ---
 
-## Beyond 1.0 — Maybe
+## v2.0.0 — Reserved
+
+Major version bump only if a future change breaks the v1 CLI surface or `schemas/v1/config.schema.json` contract. Additive features ship as v1.x.
+
+---
+
+## Beyond v2.0 — Maybe
 
 Ideas being considered, not committed:
 

@@ -3,7 +3,7 @@
 # Usage:
 #   iwr https://raw.githubusercontent.com/RKInnovate/rkload/main/scripts/install.ps1 -UseBasicParsing | iex
 #   .\scripts\install.ps1                          # from a clone
-#   .\scripts\install.ps1 -Version v0.3.3          # pin a specific tag
+#   .\scripts\install.ps1 -Version v1.0.0          # pin a specific tag
 #   .\scripts\install.ps1 -Dir 'C:\tools\rkload'   # install elsewhere
 #
 # The script picks an install directory in this order:

@@ -250,7 +250,7 @@ Output is deterministic — re-running the importer on the same spec produces a 
 ```bash
 rkload update                     # check + install if newer
 rkload update --check             # only report, don't install
-rkload update --version v0.3.4    # pin or downgrade
+rkload update --version v1.0.0    # pin or downgrade
 rkload update --force             # reinstall even when already current
 ```
 
@@ -261,7 +261,7 @@ Output is the four standard lines (target → download → install → done) so 
 The first time you run any `rkload` command after 24h, the binary briefly checks for a newer release and prints a one-line notice to stderr before the run starts:
 
 ```text
-[update available] rkload v0.3.4 — run `rkload update` to upgrade
+[update available] rkload v1.1.0 — run `rkload update` to upgrade
 ```
 
 The notice is **silent on every failure** — a network blip never stands between you and your command. It's skipped automatically when:
@@ -276,17 +276,12 @@ State lives at `~/.rkload/update.json`. Within 24h of a check, the cached "lates
 
 ## Roadmap
 
-`rkload` is under active development. The current version is a focused MVP. See [ROADMAP.md](./ROADMAP.md) for the planned feature progression:
+`rkload` is under active development. See [ROADMAP.md](./ROADMAP.md) for the full feature progression:
 
-- **v0.2** — Latency percentiles (p50/p95/p99), error grouping, distribution histogram ✅
-- **v0.3** — JSON-driven configuration, multi-endpoint suites ✅ (schema v1 in [`schemas/v1/config.schema.json`](./schemas/v1/config.schema.json); see [versioning policy](./schemas/README.md))
-- **v0.3.1** — `rkload import openapi <spec>` to generate configs from OpenAPI / Swagger ✅
-- **v0.3.2** — `rkload import postman <collection>` for Postman Collection v2.1 ✅
-- **v0.3.3** — `rkload validate <config>` with a content-hash cache that skips re-validation on unchanged files ✅
-- **v0.3.4** — `rkload update` for in-place upgrades; daily background "update available" notice ✅
-- **v0.4** — Scenario chains, auth helpers, variable extraction
-- **v0.5** — JSON / Markdown / HTML reporting, CI integration
-- **v1.0** — Stable, documented, production-ready
+- **v1.0.0** — Engine, percentiles, multi-endpoint JSON configs (schema v1 in [`schemas/v1/config.schema.json`](./schemas/v1/config.schema.json); see [versioning policy](./schemas/README.md)), OpenAPI / Swagger / Postman import, `rkload init`, `rkload validate` with content-hash cache, `rkload update` for in-place upgrades, daily background "update available" notice ✅
+- **v1.1** — Scenario chains, auth helpers, variable extraction
+- **v1.2** — JSON / Markdown / HTML reporting, CI integration
+- **v2.0** — Reserved for breaking changes only (CLI / schema v1 are stable from v1.0)
 
 ---
 
