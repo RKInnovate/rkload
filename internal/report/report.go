@@ -17,18 +17,18 @@ import (
 
 // Summary is the aggregated outcome of a load run.
 type Summary struct {
-	Total         int
-	Successful    int
-	Errors        int
-	Elapsed       time.Duration
-	Throughput    float64
-	AvgLatency    time.Duration
-	MinLatency    time.Duration
-	MaxLatency    time.Duration
-	P50Latency    time.Duration
-	P95Latency    time.Duration
-	P99Latency    time.Duration
-	StdDev        time.Duration
+	Total               int
+	Successful          int
+	Errors              int
+	Elapsed             time.Duration
+	Throughput          float64
+	AvgLatency          time.Duration
+	MinLatency          time.Duration
+	MaxLatency          time.Duration
+	P50Latency          time.Duration
+	P95Latency          time.Duration
+	P99Latency          time.Duration
+	StdDev              time.Duration
 	StatusCodes         map[int]int
 	ErrorsByClass       map[ErrorClass]int
 	LatencyDistribution []Bucket

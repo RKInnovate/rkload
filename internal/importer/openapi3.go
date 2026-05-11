@@ -11,10 +11,10 @@ import (
 // schema definitions — they don't affect what request the load tester
 // will send.
 type openAPI3 struct {
-	OpenAPI  string                       `json:"openapi"`
-	Servers  []openAPI3Server             `json:"servers"`
-	Paths    map[string]openAPI3PathItem  `json:"paths"`
-	Security []map[string][]string        `json:"security"` // global; per-op overrides this
+	OpenAPI  string                      `json:"openapi"`
+	Servers  []openAPI3Server            `json:"servers"`
+	Paths    map[string]openAPI3PathItem `json:"paths"`
+	Security []map[string][]string       `json:"security"` // global; per-op overrides this
 }
 
 type openAPI3Server struct {

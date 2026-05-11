@@ -10,12 +10,12 @@ import (
 // Swagger 2.0 splits the URL across host/basePath/schemes instead of a
 // single servers[] entry, so URL construction differs from OpenAPI 3.
 type swagger2 struct {
-	Swagger  string                       `json:"swagger"`
-	Host     string                       `json:"host"`
-	BasePath string                       `json:"basePath"`
-	Schemes  []string                     `json:"schemes"`
-	Paths    map[string]swagger2PathItem  `json:"paths"`
-	Security []map[string][]string        `json:"security"`
+	Swagger  string                      `json:"swagger"`
+	Host     string                      `json:"host"`
+	BasePath string                      `json:"basePath"`
+	Schemes  []string                    `json:"schemes"`
+	Paths    map[string]swagger2PathItem `json:"paths"`
+	Security []map[string][]string       `json:"security"`
 }
 
 type swagger2PathItem struct {
@@ -57,9 +57,9 @@ type swagger2Op struct {
 }
 
 type swagger2Parameter struct {
-	In       string      `json:"in"`
-	Name     string      `json:"name"`
-	Required bool        `json:"required"`
+	In       string `json:"in"`
+	Name     string `json:"name"`
+	Required bool   `json:"required"`
 	// Swagger 2 doesn't have a standard "example" field on body params,
 	// but `x-example` is a widely-used vendor extension. Both are checked.
 	XExample interface{} `json:"x-example"`

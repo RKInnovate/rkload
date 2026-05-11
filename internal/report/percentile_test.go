@@ -22,10 +22,10 @@ func TestComputeLatencyStats_KnownValues(t *testing.T) {
 	}{
 		{"min", stats.Min, 1 * time.Millisecond},
 		{"max", stats.Max, 100 * time.Millisecond},
-		{"avg", stats.Avg, 50500 * time.Microsecond},                      // sum 5050ms / 100 = 50.5ms exactly
-		{"p50", stats.P50, 50 * time.Millisecond},                         // ceil(50)-1 = 49 → sorted[49]
-		{"p95", stats.P95, 95 * time.Millisecond},                         // ceil(95)-1 = 94 → sorted[94]
-		{"p99", stats.P99, 99 * time.Millisecond},                         // ceil(99)-1 = 98 → sorted[98]
+		{"avg", stats.Avg, 50500 * time.Microsecond}, // sum 5050ms / 100 = 50.5ms exactly
+		{"p50", stats.P50, 50 * time.Millisecond},    // ceil(50)-1 = 49 → sorted[49]
+		{"p95", stats.P95, 95 * time.Millisecond},    // ceil(95)-1 = 94 → sorted[94]
+		{"p99", stats.P99, 99 * time.Millisecond},    // ceil(99)-1 = 98 → sorted[98]
 	}
 	for _, c := range cases {
 		if c.got != c.want {
