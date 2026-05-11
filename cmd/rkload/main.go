@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/RKInnovate/rkload/internal/importer"
 	"github.com/RKInnovate/rkload/internal/loader"
 	"github.com/RKInnovate/rkload/internal/report"
+	"github.com/RKInnovate/rkload/internal/updater"
 )
 
 // Build-time variables, populated by GoReleaser via -ldflags.
@@ -39,6 +41,8 @@ func main() {
 			os.Exit(validateMain(os.Args[2:]))
 		case "init":
 			os.Exit(initMain(os.Args[2:]))
+		case "update":
+			os.Exit(updateMain(os.Args[2:]))
 		}
 	}
 
@@ -103,6 +107,7 @@ func printRootUsage() {
 	fmt.Fprintln(os.Stderr, "  rkload init [FILE] [--force]                  write a starter config (stdout if FILE omitted)")
 	fmt.Fprintln(os.Stderr, "  rkload validate <FILE> [--no-cache]           validate a config and record metadata")
 	fmt.Fprintln(os.Stderr, "  rkload import {openapi|postman} <FILE> [...]  generate a config from a spec")
+	fmt.Fprintln(os.Stderr, "  rkload update [--check|--version V|--force]   update the binary in place")
 	fmt.Fprintln(os.Stderr, "  rkload -version                               print version and exit")
 	fmt.Fprintln(os.Stderr, "")
 	flag.Usage()
@@ -408,6 +413,96 @@ func loadAndValidateForRun(path string) (*config.Config, string, error) {
 		return cfg, fmt.Sprintf("re-checked (cache write failed: %v)", storeErr), nil
 	}
 	return cfg, "re-checked and cached", nil
+}
+
+// updateMain handles `rkload update`. The thin wrapper resolves
+// host context (executable path, GOOS, GOARCH) and delegates to
+// runUpdate so the core path is testable.
+func updateMain(args []string) int {
+	fs := flag.NewFlagSet("rkload update", flag.ContinueOnError)
+	check := fs.Bool("check", false, "Report whether an update is available; do not install")
+	pinned := fs.String("version", "", "Install a specific version (e.g. v0.3.4); allows downgrade")
+	force := fs.Bool("force", false, "Install even if the current version is at or above the target")
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "Usage: rkload update [flags]")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Checks GitHub Releases for a newer version, downloads the matching")
+		fmt.Fprintln(os.Stderr, "archive, verifies its SHA-256 against checksums.txt, and atomically")
+		fmt.Fprintln(os.Stderr, "replaces the running binary. Set RKLOAD_NO_UPDATE_CHECK=1 to opt out")
+		fmt.Fprintln(os.Stderr, "of the daily background check that runs at startup.")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Flags:")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+	if fs.NArg() != 0 {
+		fs.Usage()
+		return 1
+	}
+
+	exePath, err := os.Executable()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error: locating executable:", err)
+		return 1
+	}
+	return runUpdate(os.Stdout, os.Stderr, exePath, runtime.GOOS, runtime.GOARCH, *check, *pinned, *force)
+}
+
+// runUpdate is the testable core of `rkload update`. exePath /
+// goos / goarch are injected so tests can run against a fake
+// executable file and a controlled archive name without touching
+// the running process.
+func runUpdate(out, errOut io.Writer, exePath, goos, goarch string, check bool, pinned string, force bool) int {
+	var target updater.Release
+	if pinned != "" {
+		target = updater.Release{Tag: pinned}
+	} else {
+		rel, err := updater.Latest(nil)
+		if err != nil {
+			fmt.Fprintln(errOut, "Error:", err)
+			return 1
+		}
+		target = rel
+	}
+
+	newer := true
+	if pinned == "" {
+		ok, err := updater.Newer(version, target.Tag)
+		if err != nil {
+			fmt.Fprintln(errOut, "Error:", err)
+			return 1
+		}
+		newer = ok
+	}
+
+	if !newer && !force {
+		fmt.Fprintf(out, "rkload %s is already up to date.\n", version)
+		return 0
+	}
+
+	if check {
+		fmt.Fprintf(out, "rkload %s available (current: %s).\nRun `rkload update` to install.\n", target.Tag, version)
+		return 0
+	}
+
+	archiveName := updater.ArchiveName(target.Tag, goos, goarch)
+	fmt.Fprintf(out, "Downloading %s...\n", archiveName)
+	archivePath, err := updater.DownloadAndVerify(nil, target, archiveName)
+	if err != nil {
+		fmt.Fprintln(errOut, "Error:", err)
+		return 1
+	}
+	defer os.Remove(archivePath)
+
+	fmt.Fprintf(out, "Installing to %s...\n", exePath)
+	if err := updater.ReplaceSelf(exePath, archivePath); err != nil {
+		fmt.Fprintln(errOut, "Error:", err)
+		return 1
+	}
+	fmt.Fprintf(out, "Updated rkload to %s.\n", target.Tag)
+	return 0
 }
 
 // starterConfigTemplate is what `rkload init` emits. The endpoints

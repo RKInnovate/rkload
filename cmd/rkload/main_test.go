@@ -1,9 +1,16 @@
 package main
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +18,7 @@ import (
 
 	"github.com/RKInnovate/rkload/internal/cache"
 	"github.com/RKInnovate/rkload/internal/config"
+	"github.com/RKInnovate/rkload/internal/updater"
 )
 
 // TestVersionDefaults sanity-checks that the build-time variables have
@@ -165,6 +173,232 @@ func TestRepeatableFlag_NoSetCalls(t *testing.T) {
 	}
 	if len(*values) != 0 {
 		t.Errorf("len = %d, want 0", len(*values))
+	}
+}
+
+// ---- runUpdate -----------------------------------------------------------
+//
+// runUpdate is exercised end-to-end against a fake GitHub set up via
+// httptest. The fake serves a tarball whose checksum matches the
+// checksums.txt it advertises, so the verification step is real and
+// any regression there would break these tests.
+
+// fakeGitHubForUpdate spins up an httptest server that handles both
+// /repos/.../releases/latest (API) and the asset downloads. The
+// archive contains a single "rkload" entry with newContent so the
+// caller can verify which version landed after replacement.
+func fakeGitHubForUpdate(t *testing.T, tag, goos, goarch string, newContent []byte) string {
+	t.Helper()
+	archiveName := updater.ArchiveName(tag, goos, goarch)
+
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	if err := tw.WriteHeader(&tar.Header{Name: "rkload", Size: int64(len(newContent)), Mode: 0o755}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(newContent); err != nil {
+		t.Fatal(err)
+	}
+	tw.Close()
+	gz.Close()
+	archive := buf.Bytes()
+	sum := sha256.Sum256(archive)
+	checksums := fmt.Sprintf("%s  %s\n", hex.EncodeToString(sum[:]), archiveName)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/repos/"):
+			fmt.Fprintf(w, `{"tag_name": %q, "assets": []}`, tag)
+		case strings.HasSuffix(r.URL.Path, archiveName):
+			_, _ = w.Write(archive)
+		case strings.HasSuffix(r.URL.Path, "checksums.txt"):
+			_, _ = w.Write([]byte(checksums))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	oldAPI, oldRedirect := updater.APIBase, updater.ReleaseRedirectBase
+	updater.APIBase = srv.URL
+	updater.ReleaseRedirectBase = srv.URL
+	t.Cleanup(func() {
+		updater.APIBase = oldAPI
+		updater.ReleaseRedirectBase = oldRedirect
+		srv.Close()
+	})
+	return srv.URL
+}
+
+// writeFakeBinary creates a temporary file we can pretend is the
+// running rkload binary for ReplaceSelf to swap out.
+func writeFakeBinary(t *testing.T, content []byte) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rkload")
+	if err := os.WriteFile(path, content, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestRunUpdate_CheckPrintsAvailable(t *testing.T) {
+	// version (build-time var) is "dev" in tests → always older than
+	// the v0.99.0 we advertise → check should report availability.
+	fakeGitHubForUpdate(t, "v0.99.0", "linux", "amd64", []byte("NEW BYTES"))
+	exe := writeFakeBinary(t, []byte("OLD BYTES"))
+
+	var out, errOut bytes.Buffer
+	code := runUpdate(&out, &errOut, exe, "linux", "amd64",
+		true /* check */, "" /* pinned */, false /* force */)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "v0.99.0 available") {
+		t.Errorf("output should mention v0.99.0 available; got: %s", out.String())
+	}
+	// --check must not modify the binary.
+	got, _ := os.ReadFile(exe)
+	if string(got) != "OLD BYTES" {
+		t.Errorf("--check modified the binary; content = %q", got)
+	}
+}
+
+func TestRunUpdate_DownloadsAndReplaces(t *testing.T) {
+	fakeGitHubForUpdate(t, "v0.99.0", "linux", "amd64", []byte("NEW BYTES"))
+	exe := writeFakeBinary(t, []byte("OLD BYTES"))
+
+	var out, errOut bytes.Buffer
+	code := runUpdate(&out, &errOut, exe, "linux", "amd64", false, "", false)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	got, _ := os.ReadFile(exe)
+	if string(got) != "NEW BYTES" {
+		t.Errorf("binary not replaced; content = %q", got)
+	}
+	if !strings.Contains(out.String(), "Updated rkload to v0.99.0") {
+		t.Errorf("expected success summary; got: %s", out.String())
+	}
+}
+
+func TestRunUpdate_AlreadyUpToDate(t *testing.T) {
+	// Save and override the package-level version so Newer() reports
+	// false. Restore in cleanup so other tests aren't affected.
+	saved := version
+	version = "v0.99.0"
+	t.Cleanup(func() { version = saved })
+
+	fakeGitHubForUpdate(t, "v0.99.0", "linux", "amd64", []byte("NEW BYTES"))
+	exe := writeFakeBinary(t, []byte("OLD BYTES"))
+
+	var out, errOut bytes.Buffer
+	code := runUpdate(&out, &errOut, exe, "linux", "amd64", false, "", false)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "already up to date") {
+		t.Errorf("expected 'already up to date'; got: %s", out.String())
+	}
+	got, _ := os.ReadFile(exe)
+	if string(got) != "OLD BYTES" {
+		t.Errorf("binary modified despite up-to-date; content = %q", got)
+	}
+}
+
+func TestRunUpdate_ForceInstallsEvenWhenCurrent(t *testing.T) {
+	saved := version
+	version = "v0.99.0"
+	t.Cleanup(func() { version = saved })
+
+	fakeGitHubForUpdate(t, "v0.99.0", "linux", "amd64", []byte("FORCED"))
+	exe := writeFakeBinary(t, []byte("OLD BYTES"))
+
+	var out, errOut bytes.Buffer
+	code := runUpdate(&out, &errOut, exe, "linux", "amd64", false, "", true /* force */)
+	if code != 0 {
+		t.Fatalf("exit = %d (stderr: %s)", code, errOut.String())
+	}
+	got, _ := os.ReadFile(exe)
+	if string(got) != "FORCED" {
+		t.Errorf("--force should reinstall; got: %q", got)
+	}
+}
+
+func TestRunUpdate_PinnedVersionSkipsNewerCheck(t *testing.T) {
+	saved := version
+	version = "v0.99.0" // way newer than the pinned target below
+	t.Cleanup(func() { version = saved })
+
+	// Latest API will report v0.99.0 but we're pinning to v0.0.1 so
+	// the API call shouldn't matter — verify by NOT setting up an
+	// API-style handler at all (only the asset paths).
+	archiveName := updater.ArchiveName("v0.0.1", "linux", "amd64")
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	body := []byte("PINNED VERSION BYTES")
+	_ = tw.WriteHeader(&tar.Header{Name: "rkload", Size: int64(len(body)), Mode: 0o755})
+	_, _ = tw.Write(body)
+	tw.Close()
+	gz.Close()
+	sum := sha256.Sum256(buf.Bytes())
+	checksums := fmt.Sprintf("%s  %s\n", hex.EncodeToString(sum[:]), archiveName)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, archiveName):
+			_, _ = w.Write(buf.Bytes())
+		case strings.HasSuffix(r.URL.Path, "checksums.txt"):
+			_, _ = w.Write([]byte(checksums))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	oldRedirect := updater.ReleaseRedirectBase
+	updater.ReleaseRedirectBase = srv.URL
+	t.Cleanup(func() {
+		updater.ReleaseRedirectBase = oldRedirect
+		srv.Close()
+	})
+
+	exe := writeFakeBinary(t, []byte("OLD BYTES"))
+	var out, errOut bytes.Buffer
+	code := runUpdate(&out, &errOut, exe, "linux", "amd64", false, "v0.0.1", false)
+	if code != 0 {
+		t.Fatalf("exit = %d (stderr: %s)", code, errOut.String())
+	}
+	got, _ := os.ReadFile(exe)
+	if string(got) != "PINNED VERSION BYTES" {
+		t.Errorf("pinned downgrade did not install; got: %q", got)
+	}
+}
+
+func TestRunUpdate_NetworkError(t *testing.T) {
+	// Point at a server that always 500s.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+	oldAPI, oldRedirect := updater.APIBase, updater.ReleaseRedirectBase
+	updater.APIBase = srv.URL
+	updater.ReleaseRedirectBase = srv.URL
+	t.Cleanup(func() {
+		updater.APIBase = oldAPI
+		updater.ReleaseRedirectBase = oldRedirect
+	})
+
+	exe := writeFakeBinary(t, []byte("OLD"))
+	var out, errOut bytes.Buffer
+	code := runUpdate(&out, &errOut, exe, "linux", "amd64", false, "", false)
+	if code != 1 {
+		t.Errorf("exit = %d, want 1", code)
+	}
+	if errOut.Len() == 0 {
+		t.Errorf("expected error on stderr")
+	}
+	got, _ := os.ReadFile(exe)
+	if string(got) != "OLD" {
+		t.Errorf("network failure should not modify binary; got: %q", got)
 	}
 }
 
