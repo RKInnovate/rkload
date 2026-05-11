@@ -135,6 +135,18 @@ Endpoints run **sequentially per group** so each gets its own clean per-endpoint
 
 See [`docs/examples/basic.config.json`](./docs/examples/basic.config.json) for a fuller example and [`schemas/README.md`](./schemas/README.md) for the schema versioning policy (each `vN/` is immutable once published — never modify a published schema in place).
 
+### Starting from scratch
+
+If you don't have an OpenAPI spec or Postman collection to import from, generate a starter config and edit from there:
+
+```bash
+rkload init rkload.config.json      # write a starter to disk
+rkload init                          # or print to stdout (pipe / redirect as you like)
+rkload init --force rkload.config.json  # overwrite an existing file
+```
+
+The template includes one GET (using defaults), one POST (showing headers, body, timeout, and explicit `c` / `requests`) so every common knob is visible without consulting the schema. `REPLACE_ME` placeholders mark values that need real credentials before running — `grep REPLACE_ME` lets you find them all.
+
 ---
 
 ## Validating configs

@@ -168,6 +168,116 @@ func TestRepeatableFlag_NoSetCalls(t *testing.T) {
 	}
 }
 
+// ---- runInit -------------------------------------------------------------
+//
+// runInit emits a starter config; the tests below pin the three
+// invocation modes (stdout, file, file-exists) plus the contract
+// that whatever runInit writes must validate as a real rkload
+// config — otherwise the template has rotted since the schema or
+// validator changed.
+
+func TestRunInit_DefaultsToStdout(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := runInit(&out, &errOut, "", false); code != 0 {
+		t.Fatalf("exit code = %d (stderr: %s)", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), `"$schema"`) {
+		t.Errorf("stdout should contain $schema field, got:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), `"version": 1`) {
+		t.Errorf("stdout should contain version: 1, got:\n%s", out.String())
+	}
+}
+
+func TestRunInit_WritesToFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rkload.config.json")
+
+	var out, errOut bytes.Buffer
+	if code := runInit(&out, &errOut, path, false); code != 0 {
+		t.Fatalf("exit code = %d (stderr: %s)", code, errOut.String())
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("config not written: %v", err)
+	}
+	if !strings.Contains(string(data), `"login"`) {
+		t.Errorf("file should contain example POST endpoint, got:\n%s", data)
+	}
+	if !strings.Contains(out.String(), "Wrote starter config") {
+		t.Errorf("expected 'Wrote starter config' on stdout, got: %s", out.String())
+	}
+}
+
+func TestRunInit_RefusesOverwriteByDefault(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rkload.config.json")
+	if err := os.WriteFile(path, []byte("existing content"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	var out, errOut bytes.Buffer
+	if code := runInit(&out, &errOut, path, false); code != 1 {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	if !strings.Contains(errOut.String(), "already exists") {
+		t.Errorf("stderr should mention 'already exists', got: %s", errOut.String())
+	}
+	// File contents preserved.
+	if data, _ := os.ReadFile(path); string(data) != "existing content" {
+		t.Errorf("existing file overwritten despite no --force; got: %s", data)
+	}
+}
+
+func TestRunInit_ForceOverwritesExisting(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rkload.config.json")
+	if err := os.WriteFile(path, []byte("existing content"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	var out, errOut bytes.Buffer
+	if code := runInit(&out, &errOut, path, true); code != 0 {
+		t.Fatalf("exit code = %d (stderr: %s)", code, errOut.String())
+	}
+	data, _ := os.ReadFile(path)
+	if string(data) == "existing content" {
+		t.Error("--force should overwrite existing file")
+	}
+	if !strings.Contains(string(data), `"$schema"`) {
+		t.Errorf("expected starter config after --force, got:\n%s", data)
+	}
+}
+
+// TestRunInit_OutputValidatesAgainstSchema is the regression guard:
+// if someone edits the template and breaks the schema (renaming
+// "url" to "URL", omitting "version", etc.), this test fails before
+// the broken template lands.
+func TestRunInit_OutputValidatesAgainstSchema(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := runInit(&out, &errOut, "", false); code != 0 {
+		t.Fatalf("exit code = %d", code)
+	}
+	cfg, err := config.Parse(out.Bytes())
+	if err != nil {
+		t.Fatalf("starter config does not parse: %v", err)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("starter config does not validate: %v", err)
+	}
+}
+
+func TestRunInit_RejectsParentDirMissing(t *testing.T) {
+	// Pointing init at a path whose parent directory doesn't exist
+	// should fail clearly, not silently create one or panic.
+	path := filepath.Join(t.TempDir(), "does-not-exist", "rkload.config.json")
+
+	var out, errOut bytes.Buffer
+	if code := runInit(&out, &errOut, path, false); code != 1 {
+		t.Errorf("exit code = %d, want 1 for missing parent dir", code)
+	}
+}
+
 // ---- runValidate ---------------------------------------------------------
 //
 // Every test that exercises runValidate redirects the cache to a

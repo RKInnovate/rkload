@@ -37,6 +37,8 @@ func main() {
 			os.Exit(importMain(os.Args[2:]))
 		case "validate":
 			os.Exit(validateMain(os.Args[2:]))
+		case "init":
+			os.Exit(initMain(os.Args[2:]))
 		}
 	}
 
@@ -98,6 +100,7 @@ func printRootUsage() {
 	fmt.Fprintln(os.Stderr, "Usage:")
 	fmt.Fprintln(os.Stderr, "  rkload -url <URL> [-c N] [-n N] [-method M]   single-endpoint mode")
 	fmt.Fprintln(os.Stderr, "  rkload -config <FILE>                         multi-endpoint mode (JSON config)")
+	fmt.Fprintln(os.Stderr, "  rkload init [FILE] [--force]                  write a starter config (stdout if FILE omitted)")
 	fmt.Fprintln(os.Stderr, "  rkload validate <FILE> [--no-cache]           validate a config and record metadata")
 	fmt.Fprintln(os.Stderr, "  rkload import {openapi|postman} <FILE> [...]  generate a config from a spec")
 	fmt.Fprintln(os.Stderr, "  rkload -version                               print version and exit")
@@ -401,6 +404,104 @@ func loadAndValidateForRun(path string) (*config.Config, string, error) {
 		return cfg, fmt.Sprintf("re-checked (cache write failed: %v)", storeErr), nil
 	}
 	return cfg, "re-checked and cached", nil
+}
+
+// starterConfigTemplate is what `rkload init` emits. The endpoints
+// are deliberately representative rather than minimal — one GET with
+// defaults left implicit, one POST showing headers/body/timeout/c/n
+// — so a user editing the file sees every common knob without having
+// to consult the schema. REPLACE_ME placeholders mirror the import
+// subcommand convention: greppable, never silently shipped to prod.
+const starterConfigTemplate = `{
+  "$schema": "https://raw.githubusercontent.com/RKInnovate/rkload/main/schemas/v1/config.schema.json",
+  "version": 1,
+
+  "GET": [
+    {
+      "name": "health",
+      "url": "https://api.example.com/health",
+      "c": 10,
+      "requests": 100
+    }
+  ],
+
+  "POST": [
+    {
+      "name": "login",
+      "url": "https://api.example.com/auth/login",
+      "headers": {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer REPLACE_ME"
+      },
+      "body": "{\"email\":\"user@example.com\",\"password\":\"REPLACE_ME\"}",
+      "c": 5,
+      "requests": 50,
+      "timeout": "10s"
+    }
+  ]
+}
+`
+
+// initMain handles `rkload init [path]`. Accepts an optional positional
+// output path; without one, the template goes to stdout so the user
+// can pipe or redirect.
+func initMain(args []string) int {
+	fs := flag.NewFlagSet("rkload init", flag.ContinueOnError)
+	force := fs.Bool("force", false, "Overwrite the target file if it already exists")
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "Usage: rkload init [path] [flags]")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Writes a starter rkload config — one GET and one POST with")
+		fmt.Fprintln(os.Stderr, "headers, body, and explicit defaults — so you can begin from a")
+		fmt.Fprintln(os.Stderr, "working file instead of the schema. With no path argument the")
+		fmt.Fprintln(os.Stderr, "config is printed to stdout. Existing files are not overwritten")
+		fmt.Fprintln(os.Stderr, "unless --force is given.")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Flags:")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+	if fs.NArg() > 1 {
+		fs.Usage()
+		return 1
+	}
+	path := ""
+	if fs.NArg() == 1 {
+		path = fs.Arg(0)
+	}
+	return runInit(os.Stdout, os.Stderr, path, *force)
+}
+
+// runInit is the testable core of `rkload init`. Empty path means
+// "write to out"; a non-empty path triggers the refuse-overwrite
+// check (skipped when force is true).
+func runInit(out, errOut io.Writer, path string, force bool) int {
+	if path == "" {
+		if _, err := io.WriteString(out, starterConfigTemplate); err != nil {
+			fmt.Fprintln(errOut, err)
+			return 1
+		}
+		return 0
+	}
+
+	if !force {
+		if _, err := os.Stat(path); err == nil {
+			fmt.Fprintf(errOut, "Error: %s already exists (pass --force to overwrite)\n", path)
+			return 1
+		} else if !os.IsNotExist(err) {
+			fmt.Fprintln(errOut, err)
+			return 1
+		}
+	}
+
+	if err := os.WriteFile(path, []byte(starterConfigTemplate), 0o644); err != nil {
+		fmt.Fprintln(errOut, err)
+		return 1
+	}
+	fmt.Fprintf(out, "Wrote starter config to %s\n", path)
+	return 0
 }
 
 // validateMain handles `rkload validate <config>`. It parses the

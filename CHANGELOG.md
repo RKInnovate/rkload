@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and do not flip the exit code — validation succeeded
 - `config.Parse(data)` and exported `Config.ApplyDefaults()` so the
   CLI can split parsing from validation around the cache lookup
+- `rkload init [path] [--force]` subcommand that writes a starter
+  config (one GET, one POST with headers/body/timeout, `$schema`
+  pinned) to a file or stdout. Refuses to overwrite an existing
+  file without `--force`. Useful for starting from scratch when no
+  OpenAPI or Postman input is available
 - Initial repository scaffolding
 - MIT license, contributing guide, code of conduct
 - GitHub Actions CI pipeline (vet, staticcheck, test, build)
