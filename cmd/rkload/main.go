@@ -128,13 +128,14 @@ func runSingle(opts loader.Options) int {
 // non-zero if any endpoint had any failed requests, or if the config
 // itself is invalid — load-bearing for CI usage.
 func runFromConfig(path string) int {
-	cfg, err := config.Load(path)
+	cfg, status, err := loadAndValidateForRun(path)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 
-	fmt.Printf("Loaded config: %s (schema v%d)\n\n", path, cfg.Version)
+	fmt.Printf("Loaded config: %s (schema v%d)\n", path, cfg.Version)
+	fmt.Printf("Validation:    %s\n\n", status)
 
 	var totalRequests, totalErrors, endpointCount int
 	for _, group := range cfg.Groups() {
@@ -332,6 +333,74 @@ func importPostman(args []string) int {
 	}
 
 	return writeConfigJSON(cfg, *output)
+}
+
+// loadAndValidateForRun is the cache-aware load path for `rkload
+// -config`. It reads the file bytes, looks up the canonical-hash
+// cache entry, and either:
+//
+//   - skips Validate and returns the parsed config with a "cached …"
+//     status if the entry matches the current rkload version, or
+//   - runs full Validate, writes a fresh cache entry, and returns a
+//     "re-checked …" status on cache miss / version mismatch / any
+//     hash-or-lookup hiccup.
+//
+// A cache write failure is reported in the status line, not as an
+// error — the validation succeeded, only the bookkeeping didn't.
+func loadAndValidateForRun(path string) (*config.Config, string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, "", fmt.Errorf("config: opening %s: %w", path, err)
+	}
+	cfg, err := config.Parse(data)
+	if err != nil {
+		return nil, "", fmt.Errorf("config: parsing %s: %w", path, err)
+	}
+
+	hash, _ := cache.CanonicalHash(data) // Parse succeeded; the same bytes hash cleanly.
+	if hash != "" {
+		if entry, lookupErr := cache.Lookup(hash); lookupErr == nil && entry != nil && entry.RkloadVersion == version {
+			cfg.ApplyDefaults()
+			status := fmt.Sprintf("cached %s (rkload %s)",
+				entry.ValidatedAt.UTC().Format("2006-01-02 15:04 UTC"),
+				entry.RkloadVersion)
+			return cfg, status, nil
+		}
+	}
+
+	// Cache miss, version mismatch, or lookup error — do full validation.
+	if err := cfg.Validate(); err != nil {
+		return nil, "", err
+	}
+	cfg.ApplyDefaults()
+
+	if hash == "" {
+		// Defensive: no hash, nothing to cache.
+		return cfg, "re-checked (not cached)", nil
+	}
+	absPath, absErr := filepath.Abs(path)
+	if absErr != nil {
+		absPath = path
+	}
+	var size int64
+	if fi, statErr := os.Stat(path); statErr == nil {
+		size = fi.Size()
+	}
+	entry := &cache.Entry{
+		Hash:           hash,
+		ValidatedAt:    time.Now().UTC(),
+		RkloadVersion:  version,
+		ConfigPath:     absPath,
+		FileSizeBytes:  size,
+		SchemaURL:      cfg.Schema,
+		SchemaVersion:  cfg.Version,
+		EndpointCounts: endpointCounts(cfg),
+		Status:         cache.StatusValid,
+	}
+	if storeErr := cache.Store(entry); storeErr != nil {
+		return cfg, fmt.Sprintf("re-checked (cache write failed: %v)", storeErr), nil
+	}
+	return cfg, "re-checked and cached", nil
 }
 
 // validateMain handles `rkload validate <config>`. It parses the

@@ -358,3 +358,145 @@ func TestFormatCounts_NoneFallback(t *testing.T) {
 		t.Errorf("formatCounts(empty) = %q, want %q", got, "none")
 	}
 }
+
+// ---- loadAndValidateForRun ----------------------------------------------
+//
+// loadAndValidateForRun is the cache-aware loader used by the
+// `-config` run flow. The tests below pin the cache hit / miss /
+// version-mismatch behaviours that change whether Validate runs.
+
+func TestLoadAndValidateForRun_CacheMissThenHit(t *testing.T) {
+	cacheDir := t.TempDir()
+	t.Setenv(cache.EnvDirOverride, cacheDir)
+	path := writeTempConfig(t, validConfigJSON)
+
+	_, status1, err := loadAndValidateForRun(path)
+	if err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	if !strings.Contains(status1, "re-checked") {
+		t.Errorf("first call status = %q, want it to mention re-checked", status1)
+	}
+	if entries, _ := os.ReadDir(cacheDir); len(entries) != 1 {
+		t.Fatalf("expected 1 cache entry after first call, got %d", len(entries))
+	}
+
+	_, status2, err := loadAndValidateForRun(path)
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if !strings.Contains(status2, "cached") {
+		t.Errorf("second call status = %q, want it to mention cached", status2)
+	}
+}
+
+func TestLoadAndValidateForRun_VersionMismatchReValidates(t *testing.T) {
+	t.Setenv(cache.EnvDirOverride, t.TempDir())
+	path := writeTempConfig(t, validConfigJSON)
+
+	// Prime the cache.
+	if _, _, err := loadAndValidateForRun(path); err != nil {
+		t.Fatalf("prime: %v", err)
+	}
+
+	// Mutate the saved entry to claim it was written by an older
+	// rkload version. The next load should treat it as a miss.
+	data, _ := os.ReadFile(path)
+	hash, _ := cache.CanonicalHash(data)
+	entry, _ := cache.Lookup(hash)
+	if entry == nil {
+		t.Fatal("entry vanished after prime call")
+	}
+	entry.RkloadVersion = "0.0.1-ancient"
+	if err := cache.Store(entry); err != nil {
+		t.Fatalf("re-store: %v", err)
+	}
+
+	_, status, err := loadAndValidateForRun(path)
+	if err != nil {
+		t.Fatalf("after mutation: %v", err)
+	}
+	if strings.Contains(status, "cached ") {
+		t.Errorf("expected re-validation after version mismatch, got status: %q", status)
+	}
+	if !strings.Contains(status, "re-checked") {
+		t.Errorf("expected status to mention re-checked, got: %q", status)
+	}
+}
+
+func TestLoadAndValidateForRun_InvalidConfigReturnsError(t *testing.T) {
+	t.Setenv(cache.EnvDirOverride, t.TempDir())
+	path := writeTempConfig(t, `{"GET":[{"url":"https://example.com/"}]}`) // no version
+
+	_, _, err := loadAndValidateForRun(path)
+	if err == nil {
+		t.Fatal("expected validation error for missing version")
+	}
+	if !strings.Contains(err.Error(), "version") {
+		t.Errorf("error should mention version, got: %v", err)
+	}
+}
+
+func TestLoadAndValidateForRun_MissingFile(t *testing.T) {
+	t.Setenv(cache.EnvDirOverride, t.TempDir())
+	_, _, err := loadAndValidateForRun("/nope/nada/nothing.json")
+	if err == nil {
+		t.Fatal("expected error for missing file")
+	}
+	if !strings.Contains(err.Error(), "opening") {
+		t.Errorf("expected 'opening' in error, got: %v", err)
+	}
+}
+
+func TestLoadAndValidateForRun_CacheWriteFailureNonFatal(t *testing.T) {
+	// Point the cache at a path that cannot become a directory
+	// (a regular file at the parent slot makes MkdirAll fail with
+	// ENOTDIR), then verify validation still succeeds.
+	parentDir := t.TempDir()
+	blocker := filepath.Join(parentDir, "blocker")
+	if err := os.WriteFile(blocker, []byte("regular file"), 0o644); err != nil {
+		t.Fatalf("blocker setup: %v", err)
+	}
+	t.Setenv(cache.EnvDirOverride, filepath.Join(blocker, "cache"))
+	path := writeTempConfig(t, validConfigJSON)
+
+	cfg, status, err := loadAndValidateForRun(path)
+	if err != nil {
+		t.Fatalf("validation should not fail when cache write fails: %v", err)
+	}
+	if cfg == nil || cfg.Version != 1 {
+		t.Errorf("expected usable config; got %+v", cfg)
+	}
+	if !strings.Contains(status, "cache write failed") {
+		t.Errorf("status should mention cache write failure, got: %q", status)
+	}
+}
+
+func TestLoadAndValidateForRun_AppliesDefaultsOnHit(t *testing.T) {
+	t.Setenv(cache.EnvDirOverride, t.TempDir())
+	// Endpoint omits c/requests/timeout, so defaults must be applied
+	// even on the cache-hit path (or the loader gets c=0).
+	bareEndpointConfig := `{
+  "version": 1,
+  "GET": [{"url": "https://example.com/health"}]
+}`
+	path := writeTempConfig(t, bareEndpointConfig)
+
+	if _, _, err := loadAndValidateForRun(path); err != nil {
+		t.Fatalf("prime: %v", err)
+	}
+	cfg, status, err := loadAndValidateForRun(path)
+	if err != nil {
+		t.Fatalf("hit: %v", err)
+	}
+	if !strings.Contains(status, "cached") {
+		t.Fatalf("expected cache hit on second call, status was %q", status)
+	}
+	if cfg.GET[0].Concurrency != config.DefaultConcurrency {
+		t.Errorf("Concurrency on cached config = %d, want default %d (defaults must run on hit)",
+			cfg.GET[0].Concurrency, config.DefaultConcurrency)
+	}
+	if cfg.GET[0].Timeout != config.DefaultTimeout {
+		t.Errorf("Timeout on cached config = %q, want default %q", cfg.GET[0].Timeout, config.DefaultTimeout)
+	}
+}
