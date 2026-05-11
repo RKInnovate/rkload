@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
@@ -13,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -224,7 +226,7 @@ func TestMaybePrintUpdateNotice_EnvOptOut(t *testing.T) {
 func TestMaybePrintUpdateNotice_PrintsWhenNewer(t *testing.T) {
 	setVersion(t, "v0.3.0")
 	t.Setenv(updater.EnvStateDirOverride, t.TempDir())
-	fakeGitHubForUpdate(t, "v0.9.0", "linux", "amd64", []byte("ignored"))
+	fakeGitHubForUpdate(t, "v0.9.0", runtime.GOOS, runtime.GOARCH, []byte("ignored"))
 
 	var buf bytes.Buffer
 	maybePrintUpdateNotice(&buf, true)
@@ -239,7 +241,7 @@ func TestMaybePrintUpdateNotice_PrintsWhenNewer(t *testing.T) {
 func TestMaybePrintUpdateNotice_NotNewer_NoNotice(t *testing.T) {
 	setVersion(t, "v0.9.0") // ahead of what the fake will offer
 	t.Setenv(updater.EnvStateDirOverride, t.TempDir())
-	fakeGitHubForUpdate(t, "v0.3.0", "linux", "amd64", []byte("ignored"))
+	fakeGitHubForUpdate(t, "v0.3.0", runtime.GOOS, runtime.GOARCH, []byte("ignored"))
 
 	var buf bytes.Buffer
 	maybePrintUpdateNotice(&buf, true)
@@ -318,26 +320,55 @@ func TestMaybePrintUpdateNotice_NetworkErrorIsSilent(t *testing.T) {
 // checksums.txt it advertises, so the verification step is real and
 // any regression there would break these tests.
 
-// fakeGitHubForUpdate spins up an httptest server that handles both
-// /repos/.../releases/latest (API) and the asset downloads. The
-// archive contains a single "rkload" entry with newContent so the
-// caller can verify which version landed after replacement.
-func fakeGitHubForUpdate(t *testing.T, tag, goos, goarch string, newContent []byte) string {
+// buildReleaseArchive packages binaryContent under the host-correct
+// binary name (rkload.exe on Windows, rkload elsewhere) in either a
+// tar.gz or zip archive matching GoReleaser's per-OS choice. Returns
+// the archive bytes — callers compute their own SHA-256 for the
+// checksums.txt entry.
+func buildReleaseArchive(t *testing.T, goos string, binaryContent []byte) []byte {
 	t.Helper()
-	archiveName := updater.ArchiveName(tag, goos, goarch)
-
+	binName := "rkload"
+	if goos == "windows" {
+		binName = "rkload.exe"
+	}
 	var buf bytes.Buffer
+	if goos == "windows" {
+		zw := zip.NewWriter(&buf)
+		w, err := zw.Create(binName)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write(binaryContent); err != nil {
+			t.Fatal(err)
+		}
+		if err := zw.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return buf.Bytes()
+	}
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
-	if err := tw.WriteHeader(&tar.Header{Name: "rkload", Size: int64(len(newContent)), Mode: 0o755}); err != nil {
+	if err := tw.WriteHeader(&tar.Header{Name: binName, Size: int64(len(binaryContent)), Mode: 0o755}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tw.Write(newContent); err != nil {
+	if _, err := tw.Write(binaryContent); err != nil {
 		t.Fatal(err)
 	}
 	tw.Close()
 	gz.Close()
-	archive := buf.Bytes()
+	return buf.Bytes()
+}
+
+// fakeGitHubForUpdate spins up an httptest server that handles both
+// /repos/.../releases/latest (API) and the asset downloads. The
+// archive is built for the supplied goos so the in-archive binary
+// name (rkload vs rkload.exe) and format (.tar.gz vs .zip) match
+// what ReplaceSelf will look for on this host. Tests should pass
+// runtime.GOOS / runtime.GOARCH to keep ReplaceSelf happy.
+func fakeGitHubForUpdate(t *testing.T, tag, goos, goarch string, newContent []byte) string {
+	t.Helper()
+	archiveName := updater.ArchiveName(tag, goos, goarch)
+	archive := buildReleaseArchive(t, goos, newContent)
 	sum := sha256.Sum256(archive)
 	checksums := fmt.Sprintf("%s  %s\n", hex.EncodeToString(sum[:]), archiveName)
 
@@ -365,11 +396,17 @@ func fakeGitHubForUpdate(t *testing.T, tag, goos, goarch string, newContent []by
 }
 
 // writeFakeBinary creates a temporary file we can pretend is the
-// running rkload binary for ReplaceSelf to swap out.
+// running rkload binary for ReplaceSelf to swap out. Named with the
+// host-correct extension so Windows zip extraction lands on the
+// expected filename.
 func writeFakeBinary(t *testing.T, content []byte) string {
 	t.Helper()
 	dir := t.TempDir()
-	path := filepath.Join(dir, "rkload")
+	name := "rkload"
+	if runtime.GOOS == "windows" {
+		name = "rkload.exe"
+	}
+	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, content, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -379,11 +416,11 @@ func writeFakeBinary(t *testing.T, content []byte) string {
 func TestRunUpdate_CheckPrintsAvailable(t *testing.T) {
 	// version (build-time var) is "dev" in tests → always older than
 	// the v0.99.0 we advertise → check should report availability.
-	fakeGitHubForUpdate(t, "v0.99.0", "linux", "amd64", []byte("NEW BYTES"))
+	fakeGitHubForUpdate(t, "v0.99.0", runtime.GOOS, runtime.GOARCH, []byte("NEW BYTES"))
 	exe := writeFakeBinary(t, []byte("OLD BYTES"))
 
 	var out, errOut bytes.Buffer
-	code := runUpdate(&out, &errOut, exe, "linux", "amd64",
+	code := runUpdate(&out, &errOut, exe, runtime.GOOS, runtime.GOARCH,
 		true /* check */, "" /* pinned */, false /* force */)
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, errOut.String())
@@ -399,11 +436,11 @@ func TestRunUpdate_CheckPrintsAvailable(t *testing.T) {
 }
 
 func TestRunUpdate_DownloadsAndReplaces(t *testing.T) {
-	fakeGitHubForUpdate(t, "v0.99.0", "linux", "amd64", []byte("NEW BYTES"))
+	fakeGitHubForUpdate(t, "v0.99.0", runtime.GOOS, runtime.GOARCH, []byte("NEW BYTES"))
 	exe := writeFakeBinary(t, []byte("OLD BYTES"))
 
 	var out, errOut bytes.Buffer
-	code := runUpdate(&out, &errOut, exe, "linux", "amd64", false, "", false)
+	code := runUpdate(&out, &errOut, exe, runtime.GOOS, runtime.GOARCH, false, "", false)
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
@@ -423,11 +460,11 @@ func TestRunUpdate_AlreadyUpToDate(t *testing.T) {
 	version = "v0.99.0"
 	t.Cleanup(func() { version = saved })
 
-	fakeGitHubForUpdate(t, "v0.99.0", "linux", "amd64", []byte("NEW BYTES"))
+	fakeGitHubForUpdate(t, "v0.99.0", runtime.GOOS, runtime.GOARCH, []byte("NEW BYTES"))
 	exe := writeFakeBinary(t, []byte("OLD BYTES"))
 
 	var out, errOut bytes.Buffer
-	code := runUpdate(&out, &errOut, exe, "linux", "amd64", false, "", false)
+	code := runUpdate(&out, &errOut, exe, runtime.GOOS, runtime.GOARCH, false, "", false)
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
@@ -445,11 +482,11 @@ func TestRunUpdate_ForceInstallsEvenWhenCurrent(t *testing.T) {
 	version = "v0.99.0"
 	t.Cleanup(func() { version = saved })
 
-	fakeGitHubForUpdate(t, "v0.99.0", "linux", "amd64", []byte("FORCED"))
+	fakeGitHubForUpdate(t, "v0.99.0", runtime.GOOS, runtime.GOARCH, []byte("FORCED"))
 	exe := writeFakeBinary(t, []byte("OLD BYTES"))
 
 	var out, errOut bytes.Buffer
-	code := runUpdate(&out, &errOut, exe, "linux", "amd64", false, "", true /* force */)
+	code := runUpdate(&out, &errOut, exe, runtime.GOOS, runtime.GOARCH, false, "", true /* force */)
 	if code != 0 {
 		t.Fatalf("exit = %d (stderr: %s)", code, errOut.String())
 	}
@@ -467,22 +504,15 @@ func TestRunUpdate_PinnedVersionSkipsNewerCheck(t *testing.T) {
 	// Latest API will report v0.99.0 but we're pinning to v0.0.1 so
 	// the API call shouldn't matter — verify by NOT setting up an
 	// API-style handler at all (only the asset paths).
-	archiveName := updater.ArchiveName("v0.0.1", "linux", "amd64")
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(gz)
-	body := []byte("PINNED VERSION BYTES")
-	_ = tw.WriteHeader(&tar.Header{Name: "rkload", Size: int64(len(body)), Mode: 0o755})
-	_, _ = tw.Write(body)
-	tw.Close()
-	gz.Close()
-	sum := sha256.Sum256(buf.Bytes())
+	archiveName := updater.ArchiveName("v0.0.1", runtime.GOOS, runtime.GOARCH)
+	archive := buildReleaseArchive(t, runtime.GOOS, []byte("PINNED VERSION BYTES"))
+	sum := sha256.Sum256(archive)
 	checksums := fmt.Sprintf("%s  %s\n", hex.EncodeToString(sum[:]), archiveName)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, archiveName):
-			_, _ = w.Write(buf.Bytes())
+			_, _ = w.Write(archive)
 		case strings.HasSuffix(r.URL.Path, "checksums.txt"):
 			_, _ = w.Write([]byte(checksums))
 		default:
@@ -498,7 +528,7 @@ func TestRunUpdate_PinnedVersionSkipsNewerCheck(t *testing.T) {
 
 	exe := writeFakeBinary(t, []byte("OLD BYTES"))
 	var out, errOut bytes.Buffer
-	code := runUpdate(&out, &errOut, exe, "linux", "amd64", false, "v0.0.1", false)
+	code := runUpdate(&out, &errOut, exe, runtime.GOOS, runtime.GOARCH, false, "v0.0.1", false)
 	if code != 0 {
 		t.Fatalf("exit = %d (stderr: %s)", code, errOut.String())
 	}
@@ -524,7 +554,7 @@ func TestRunUpdate_NetworkError(t *testing.T) {
 
 	exe := writeFakeBinary(t, []byte("OLD"))
 	var out, errOut bytes.Buffer
-	code := runUpdate(&out, &errOut, exe, "linux", "amd64", false, "", false)
+	code := runUpdate(&out, &errOut, exe, runtime.GOOS, runtime.GOARCH, false, "", false)
 	if code != 1 {
 		t.Errorf("exit = %d, want 1", code)
 	}
