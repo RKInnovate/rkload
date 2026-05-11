@@ -97,6 +97,8 @@ Latency distribution:
 
 ¹ Exactly one of `-url` or `-config` is required.
 
+Subcommands: `rkload import {openapi|postman} <file>` (see [generating configs](#generating-configs-from-existing-api-specs)), `rkload validate <file>` (see [validating configs](#validating-configs)).
+
 ---
 
 ## Multi-endpoint configs
@@ -132,6 +134,46 @@ rkload -config rkload.config.json
 Endpoints run **sequentially per group** so each gets its own clean per-endpoint report (latency, error breakdown, distribution histogram), followed by an `=== Overall ===` aggregate. The exit code is non-zero if any endpoint had any failed request — same CI semantic as the single-URL mode.
 
 See [`docs/examples/basic.config.json`](./docs/examples/basic.config.json) for a fuller example and [`schemas/README.md`](./schemas/README.md) for the schema versioning policy (each `vN/` is immutable once published — never modify a published schema in place).
+
+---
+
+## Validating configs
+
+For large generated configs, you don't want to re-run schema validation on every load test. `rkload validate <config>` checks a config against the schema and records the outcome in a small on-disk cache so subsequent `rkload -config` runs can skip re-validation when the file is unchanged.
+
+```bash
+rkload validate rkload.config.json
+```
+
+```text
+Validated: /abs/path/rkload.config.json
+  Status:    valid
+  Hash:      bc9a0403…6617b4d
+  Size:      559 bytes
+  Schema:    https://raw.githubusercontent.com/RKInnovate/rkload/main/schemas/v1/config.schema.json
+  Version:   1
+  Endpoints: GET=2, POST=1 (total: 3)
+  Cached:    yes (~/.rkload/cache/bc9a0403…6617b4d.json)
+```
+
+The cache key is a **canonical JSON hash** — reformatting or re-ordering keys leaves the hash unchanged; any semantic edit changes it and forces re-validation on the next run. Each cache entry records the file path, size, schema URL and version, per-method endpoint counts, the rkload version that performed the validation, and a timestamp.
+
+```bash
+# Skip both reading and writing the cache (useful in CI):
+rkload validate --no-cache rkload.config.json
+
+# Redirect the cache for testing or per-project isolation:
+RKLOAD_CACHE_DIR=./.rkload-cache rkload validate rkload.config.json
+```
+
+Validation runs automatically on every `rkload -config` invocation too — `validate` is just the standalone form. On a cache hit the run shows:
+
+```text
+Loaded config: rkload.config.json (schema v1)
+Validation:    cached 2026-05-11 14:32 UTC (rkload 0.3.3)
+```
+
+On a cache miss (or after editing the config) it shows `re-checked and cached`. Cache write failures are reported inline and do **not** fail the run — the load test still proceeds with a freshly validated config.
 
 ---
 
@@ -179,6 +221,7 @@ Output is deterministic — re-running the importer on the same spec produces a 
 - **v0.3** — JSON-driven configuration, multi-endpoint suites ✅ (schema v1 in [`schemas/v1/config.schema.json`](./schemas/v1/config.schema.json); see [versioning policy](./schemas/README.md))
 - **v0.3.1** — `rkload import openapi <spec>` to generate configs from OpenAPI / Swagger ✅
 - **v0.3.2** — `rkload import postman <collection>` for Postman Collection v2.1 ✅
+- **v0.3.3** — `rkload validate <config>` with a content-hash cache that skips re-validation on unchanged files ✅
 - **v0.4** — Scenario chains, auth helpers, variable extraction
 - **v0.5** — JSON / Markdown / HTML reporting, CI integration
 - **v1.0** — Stable, documented, production-ready

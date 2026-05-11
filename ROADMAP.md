@@ -77,6 +77,20 @@ Generate rkload configs from existing API specifications so teams with OpenAPI s
 
 ---
 
+## v0.3.3 — Validate subcommand ✅
+
+A standalone validation step that doubles as a record-keeping cache, so large configs don't re-validate on every run.
+
+- [x] `rkload validate <config>` subcommand prints a one-screen summary (path, canonical hash, file size, schema URL/version, per-method endpoint counts) and returns non-zero on any validation failure
+- [x] `internal/cache` package storing `~/.rkload/cache/<sha256>.json` entries keyed by canonical JSON hash (sorted-key, whitespace-invariant)
+- [x] `--no-cache` flag on `validate` to skip both read and write — useful in CI
+- [x] `RKLOAD_CACHE_DIR` environment variable to redirect the cache (per-project isolation, sandboxed tests)
+- [x] `-config` run flow consults the cache automatically: hash hit + rkload-version match skips re-validation; miss / mismatch re-validates and refreshes the entry
+- [x] Cache write failures reported inline, never fatal — validation succeeded; only the bookkeeping didn't
+- [x] `config.Parse` + exported `Config.ApplyDefaults` so the CLI can split parse-from-validate around the cache lookup
+
+---
+
 ## v0.4.0 — Scenarios
 
 The feature that justifies the name "scenario-driven."

@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `internal/cache` package: `CanonicalHash` (sorted-key, whitespace-
+  invariant SHA-256 of the parsed JSON), `Entry` metadata struct
+  (rkload version, schema URL/version, per-method endpoint counts,
+  file size, timestamp), and atomic `Store`/`Lookup` over
+  `~/.rkload/cache/` (overridable via `RKLOAD_CACHE_DIR`)
+- `rkload validate <config>` subcommand that runs full schema
+  validation, writes a cache entry, and prints a one-screen summary
+  (path, hash, size, schema, per-method counts, cache status).
+  `--no-cache` skips both reading and writing the cache
+- Cache-aware `-config` run flow: hash-matched configs skip re-
+  validation; cache misses or rkload-version mismatches re-validate
+  and refresh the entry. Cache write failures are reported inline
+  and do not flip the exit code — validation succeeded
+- `config.Parse(data)` and exported `Config.ApplyDefaults()` so the
+  CLI can split parsing from validation around the cache lookup
 - Initial repository scaffolding
 - MIT license, contributing guide, code of conduct
 - GitHub Actions CI pipeline (vet, staticcheck, test, build)
