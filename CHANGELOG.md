@@ -7,7 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+### Added (v0.3.4 — auto-update)
+- `internal/updater` package: `Latest()` discovery via GitHub
+  Releases API with a redirect-based fallback for rate-limited
+  callers, `Newer()` semver comparison (treats "dev" / snapshot
+  builds as always older), `ArchiveName()` mirroring GoReleaser's
+  name_template, and `DownloadAndVerify()` that fetches the
+  archive plus checksums.txt and bails on any SHA-256 mismatch
+- `ReplaceSelf` atomically swaps the binary at the resolved
+  executable path. Unix uses `os.Rename`; Windows shuffles via
+  `<path>.old` because the running .exe can't be overwritten.
+  Stale `.old` files are removed at the next startup by
+  `CleanupStaleOld`. Symlinks are resolved before the swap so
+  installations behind `/usr/local/bin/rkload`-style symlinks
+  update the real file instead of dangling the link
+- `rkload update` subcommand with `--check` (dry run), `--version`
+  (pin / downgrade), and `--force` (reinstall when already at
+  latest)
+- Daily background "update available" notice on startup. Skipped
+  for non-tty stdout, `version=="dev"`, and `RKLOAD_NO_UPDATE_CHECK=1`.
+  State persists at `~/.rkload/update.json`; subsequent runs
+  within 24h use cached state and don't touch the network.
+  Network failures are silent — load tests never block on an
+  unreachable update host
+
+### Added (v0.3.3 — validate + cache)
 - `internal/cache` package: `CanonicalHash` (sorted-key, whitespace-
   invariant SHA-256 of the parsed JSON), `Entry` metadata struct
   (rkload version, schema URL/version, per-method endpoint counts,

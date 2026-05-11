@@ -50,6 +50,8 @@ make build
 ./bin/rkload --help
 ```
 
+Once installed, `rkload update` keeps you on the latest release (see [Updating](#updating-rkload) below).
+
 Run a basic load test:
 
 ```bash
@@ -241,6 +243,37 @@ Output is deterministic — re-running the importer on the same spec produces a 
 
 ---
 
+## Updating rkload
+
+`rkload update` checks GitHub Releases for a newer version, downloads the host-matching GoReleaser archive, **verifies its SHA-256 against the published `checksums.txt`**, and atomically replaces the running binary.
+
+```bash
+rkload update                     # check + install if newer
+rkload update --check             # only report, don't install
+rkload update --version v0.3.4    # pin or downgrade
+rkload update --force             # reinstall even when already current
+```
+
+Output is the four standard lines (target → download → install → done) so you can see exactly what happened. Failures don't leave a half-swapped binary: extraction errors clean up the temp file, and rename errors roll back. On Windows the running `rkload.exe` is moved aside to `rkload.exe.old` and removed on the next run (Windows refuses to overwrite a running executable, but allows renaming it).
+
+### Daily background check
+
+The first time you run any `rkload` command after 24h, the binary briefly checks for a newer release and prints a one-line notice to stderr before the run starts:
+
+```text
+[update available] rkload v0.3.4 — run `rkload update` to upgrade
+```
+
+The notice is **silent on every failure** — a network blip never stands between you and your command. It's skipped automatically when:
+
+- `version == "dev"` / `unknown` (locally built — nothing to point at)
+- `RKLOAD_NO_UPDATE_CHECK=1` (explicit opt-out)
+- stdout is not a tty (CI / piped / redirected — would corrupt machine-readable output)
+
+State lives at `~/.rkload/update.json`. Within 24h of a check, the cached "latest version seen" drives the notice without any network call, so the second `rkload` of the day is free.
+
+---
+
 ## Roadmap
 
 `rkload` is under active development. The current version is a focused MVP. See [ROADMAP.md](./ROADMAP.md) for the planned feature progression:
@@ -250,6 +283,7 @@ Output is deterministic — re-running the importer on the same spec produces a 
 - **v0.3.1** — `rkload import openapi <spec>` to generate configs from OpenAPI / Swagger ✅
 - **v0.3.2** — `rkload import postman <collection>` for Postman Collection v2.1 ✅
 - **v0.3.3** — `rkload validate <config>` with a content-hash cache that skips re-validation on unchanged files ✅
+- **v0.3.4** — `rkload update` for in-place upgrades; daily background "update available" notice ✅
 - **v0.4** — Scenario chains, auth helpers, variable extraction
 - **v0.5** — JSON / Markdown / HTML reporting, CI integration
 - **v1.0** — Stable, documented, production-ready

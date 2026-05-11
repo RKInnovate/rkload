@@ -94,6 +94,18 @@ A standalone validation step that doubles as a record-keeping cache, so large co
 
 ---
 
+## v0.3.4 — Self-update ✅
+
+Keep installed rkload binaries current without re-running the install script.
+
+- [x] `rkload update` subcommand: discovers latest release via GitHub API (with redirect fallback for rate-limited callers), downloads the GoReleaser archive matching the host's GOOS/GOARCH, verifies SHA-256 against the published `checksums.txt`, atomically replaces the running binary
+- [x] Cross-platform replace: Unix `os.Rename` + Windows `<path>.old` shuffle (running .exe can't be overwritten but can be renamed)
+- [x] `--check` (report only, no install), `--version vX.Y.Z` (pin / downgrade), `--force` (reinstall even when current)
+- [x] Daily background "update available" notice on startup. Silent on every failure; skipped for non-tty stdout, dev builds, and `RKLOAD_NO_UPDATE_CHECK=1`. State persists at `~/.rkload/update.json` so the second invocation within 24h doesn't touch the network
+- [x] `internal/updater` package fully unit-tested against an `httptest` GitHub stand-in — no live network calls in CI
+
+---
+
 ## v0.4.0 — Scenarios
 
 The feature that justifies the name "scenario-driven."
