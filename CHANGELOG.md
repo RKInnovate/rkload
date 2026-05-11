@@ -34,6 +34,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   location, and verify with `rkload -version`. Pin a release via
   `--version v0.3.3`; redirect via `--dir DIR` or
   `RKLOAD_INSTALL_DIR`
+- `rkload import openapi --server-url URL` overrides the spec's
+  base URL entirely (works for OpenAPI 3 and Swagger 2); paired
+  with `--server-index N` for picking servers[N] of an OpenAPI 3
+  spec. Out-of-range indices error clearly listing the valid
+  range. Specs with no servers[] block can now be imported by
+  passing `--server-url` explicitly
 - Initial repository scaffolding
 - MIT license, contributing guide, code of conduct
 - GitHub Actions CI pipeline (vet, staticcheck, test, build)

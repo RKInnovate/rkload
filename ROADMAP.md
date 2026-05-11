@@ -90,6 +90,7 @@ A standalone validation step that doubles as a record-keeping cache, so large co
 - [x] `config.Parse` + exported `Config.ApplyDefaults` so the CLI can split parse-from-validate around the cache lookup
 - [x] `rkload init [path] [--force]` subcommand that writes a starter config so users without an OpenAPI / Postman input can start from a working file
 - [x] One-line installers (`scripts/install.sh`, `scripts/install.ps1`) so users without a Go toolchain can pull the matching release archive and get `rkload` onto their PATH
+- [x] `--server-url` / `--server-index` on `rkload import openapi` so specs that list a dev server first (the common FastAPI pattern) don't force users to hand-edit every URL after import
 
 ---
 

@@ -384,6 +384,114 @@ func endpointNames(eps []config.Endpoint) []string {
 	return out
 }
 
+// ---- --server-url / --server-index --------------------------------------
+//
+// The smoke test against the DocRithm spec surfaced a real-world
+// pattern: specs that list a dev server first and production
+// second. These tests pin the override behaviour added to address
+// that.
+
+// multiServerSpec has localhost first (mirroring the DocRithm spec)
+// and prod second, so we can test both index selection and explicit
+// URL override.
+const multiServerSpec = `{
+  "openapi": "3.0.0",
+  "info": {"title": "demo", "version": "1.0"},
+  "servers": [
+    {"url": "http://localhost:8000", "description": "Development"},
+    {"url": "https://api.example.com", "description": "Production"}
+  ],
+  "paths": {
+    "/health": {"get": {"operationId": "health"}}
+  }
+}`
+
+func TestOpenAPI3_DefaultsToFirstServer(t *testing.T) {
+	cfg, err := OpenAPI(strings.NewReader(multiServerSpec), OpenAPIOptions{})
+	if err != nil {
+		t.Fatalf("OpenAPI: %v", err)
+	}
+	if cfg.GET[0].URL != "http://localhost:8000/health" {
+		t.Errorf("default base = %q, want servers[0]", cfg.GET[0].URL)
+	}
+}
+
+func TestOpenAPI3_ServerIndexPicksAlternate(t *testing.T) {
+	cfg, err := OpenAPI(strings.NewReader(multiServerSpec), OpenAPIOptions{ServerIndex: 1})
+	if err != nil {
+		t.Fatalf("OpenAPI: %v", err)
+	}
+	if cfg.GET[0].URL != "https://api.example.com/health" {
+		t.Errorf("ServerIndex=1 URL = %q, want servers[1]", cfg.GET[0].URL)
+	}
+}
+
+func TestOpenAPI3_ServerIndexOutOfRange(t *testing.T) {
+	_, err := OpenAPI(strings.NewReader(multiServerSpec), OpenAPIOptions{ServerIndex: 5})
+	if err == nil {
+		t.Fatal("expected out-of-range error")
+	}
+	if !strings.Contains(err.Error(), "out of range") {
+		t.Errorf("want 'out of range' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "valid indices are 0..1") {
+		t.Errorf("error should list valid index range, got: %v", err)
+	}
+}
+
+func TestOpenAPI3_ServerURLOverridesEverything(t *testing.T) {
+	cfg, err := OpenAPI(strings.NewReader(multiServerSpec), OpenAPIOptions{
+		ServerURL:   "https://stage.example.com/api",
+		ServerIndex: 1, // should be ignored
+	})
+	if err != nil {
+		t.Fatalf("OpenAPI: %v", err)
+	}
+	if cfg.GET[0].URL != "https://stage.example.com/api/health" {
+		t.Errorf("ServerURL not applied: got %q", cfg.GET[0].URL)
+	}
+}
+
+func TestOpenAPI3_ServerURLWorksWithNoServersBlock(t *testing.T) {
+	// FastAPI and friends sometimes omit servers[]; we still want
+	// --server-url to rescue that case rather than refusing to import.
+	noServers := `{
+  "openapi": "3.0.0",
+  "info": {"title": "demo", "version": "1.0"},
+  "paths": {"/health": {"get": {"operationId": "health"}}}
+}`
+	_, err := OpenAPI(strings.NewReader(noServers), OpenAPIOptions{})
+	if err == nil {
+		t.Fatal("expected error when spec has no servers and no override")
+	}
+	cfg, err := OpenAPI(strings.NewReader(noServers), OpenAPIOptions{ServerURL: "https://x.example.com"})
+	if err != nil {
+		t.Fatalf("OpenAPI with override: %v", err)
+	}
+	if cfg.GET[0].URL != "https://x.example.com/health" {
+		t.Errorf("override URL = %q", cfg.GET[0].URL)
+	}
+}
+
+func TestSwagger2_ServerURLOverridesHostBasePath(t *testing.T) {
+	spec := `{
+  "swagger": "2.0",
+  "host": "petstore.example.com",
+  "basePath": "/v1",
+  "schemes": ["https"],
+  "paths": {"/health": {"get": {"operationId": "health"}}}
+}`
+	cfg, err := OpenAPI(strings.NewReader(spec), OpenAPIOptions{
+		ServerURL: "https://override.example.com/api",
+	})
+	if err != nil {
+		t.Fatalf("OpenAPI: %v", err)
+	}
+	if cfg.GET[0].URL != "https://override.example.com/api/health" {
+		t.Errorf("Swagger 2 ServerURL not applied: got %q", cfg.GET[0].URL)
+	}
+}
+
 func TestLooksLikeJSON(t *testing.T) {
 	cases := []struct {
 		in   string

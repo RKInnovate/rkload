@@ -221,6 +221,10 @@ rkload import openapi --path-prefix /api/v1/ spec.yaml -o v1.config.json
 
 # Override per-endpoint defaults at generation time
 rkload import openapi -c 50 -n 1000 -timeout 10s spec.yaml -o rkload.config.json
+
+# Point endpoints at production instead of the spec's first server
+rkload import openapi --server-url https://api.example.com spec.yaml -o prod.config.json
+rkload import openapi --server-index 1 spec.yaml -o prod.config.json   # OpenAPI 3 only
 ```
 
 What you get:

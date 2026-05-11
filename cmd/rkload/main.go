@@ -224,6 +224,8 @@ func importOpenAPI(args []string) int {
 	timeout := fs.String("timeout", "", "Default timeout for generated endpoints (empty = config default)")
 	tagFilter := fs.String("tag", "", "Include only operations whose tags contain this value")
 	pathPrefix := fs.String("path-prefix", "", "Include only paths starting with this prefix (e.g. /api/v1/)")
+	serverURL := fs.String("server-url", "", "Override the spec's base URL (servers[] / host+basePath) — wins over --server-index")
+	serverIndex := fs.Int("server-index", 0, "Pick servers[N] from an OpenAPI 3 spec (default 0; ignored for Swagger 2)")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "Usage: rkload import openapi <spec> [flags]")
 		fmt.Fprintln(os.Stderr, "")
@@ -252,6 +254,8 @@ func importOpenAPI(args []string) int {
 		DefaultTimeout:     *timeout,
 		TagFilter:          *tagFilter,
 		PathPrefix:         *pathPrefix,
+		ServerURL:          *serverURL,
+		ServerIndex:        *serverIndex,
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

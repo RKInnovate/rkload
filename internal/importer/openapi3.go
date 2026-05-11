@@ -74,12 +74,9 @@ type openAPI3MediaType struct {
 // lexically, methods in the order returned by methodOps), so two runs
 // of the importer on the same spec produce byte-identical output.
 func (s *openAPI3) toConfig(opts OpenAPIOptions) (*config.Config, error) {
-	if len(s.Servers) == 0 {
-		return nil, fmt.Errorf("importer: openapi spec has no servers[] — cannot construct full URLs")
-	}
-	base := s.Servers[0].URL
-	if base == "" {
-		return nil, fmt.Errorf("importer: openapi spec servers[0].url is empty")
+	base, err := s.resolveBaseURL(opts)
+	if err != nil {
+		return nil, err
 	}
 
 	cfg := &config.Config{
@@ -126,6 +123,28 @@ func (s *openAPI3) toConfig(opts OpenAPIOptions) (*config.Config, error) {
 		}
 	}
 	return cfg, nil
+}
+
+// resolveBaseURL picks the base URL to prefix to every endpoint. The
+// explicit --server-url override wins; otherwise servers[ServerIndex]
+// is used. An out-of-range index produces a clear error listing the
+// available indices rather than silently falling back to servers[0].
+func (s *openAPI3) resolveBaseURL(opts OpenAPIOptions) (string, error) {
+	if opts.ServerURL != "" {
+		return opts.ServerURL, nil
+	}
+	if len(s.Servers) == 0 {
+		return "", fmt.Errorf("importer: openapi spec has no servers[] — pass --server-url to set a base URL explicitly")
+	}
+	if opts.ServerIndex < 0 || opts.ServerIndex >= len(s.Servers) {
+		return "", fmt.Errorf("importer: --server-index %d out of range (spec has %d server(s); valid indices are 0..%d)",
+			opts.ServerIndex, len(s.Servers), len(s.Servers)-1)
+	}
+	url := s.Servers[opts.ServerIndex].URL
+	if url == "" {
+		return "", fmt.Errorf("importer: servers[%d].url is empty — pass --server-url to set one explicitly", opts.ServerIndex)
+	}
+	return url, nil
 }
 
 // jsonExampleFromOp3 pulls a JSON-encoded example body out of an

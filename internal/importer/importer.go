@@ -40,6 +40,17 @@ type OpenAPIOptions struct {
 	DefaultTimeout     string // applied to every endpoint (defaults to config.DefaultTimeout if empty)
 	TagFilter          string // include only operations whose tags contain this value (empty = no filter)
 	PathPrefix         string // include only paths starting with this prefix (empty = no filter)
+
+	// ServerURL overrides the base URL entirely, ignoring servers[]
+	// (OpenAPI 3) or host/basePath/schemes (Swagger 2). Most useful
+	// when the spec lists a development server first and the user
+	// wants to point the generated config at production.
+	ServerURL string
+
+	// ServerIndex selects which entry of servers[] to use for
+	// OpenAPI 3 specs. Defaults to 0 (the conventional choice).
+	// Ignored for Swagger 2 and when ServerURL is set.
+	ServerIndex int
 }
 
 // OpenAPI converts an OpenAPI 3.x or Swagger 2.0 spec (JSON or YAML)

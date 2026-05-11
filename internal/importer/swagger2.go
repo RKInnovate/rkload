@@ -67,14 +67,19 @@ type swagger2Parameter struct {
 }
 
 func (s *swagger2) toConfig(opts OpenAPIOptions) (*config.Config, error) {
-	scheme := "https"
-	if len(s.Schemes) > 0 {
-		scheme = s.Schemes[0]
+	var base string
+	if opts.ServerURL != "" {
+		base = opts.ServerURL
+	} else {
+		scheme := "https"
+		if len(s.Schemes) > 0 {
+			scheme = s.Schemes[0]
+		}
+		if s.Host == "" {
+			return nil, fmt.Errorf("importer: swagger 2.0 spec has empty host — pass --server-url to set a base URL explicitly")
+		}
+		base = scheme + "://" + s.Host + s.BasePath
 	}
-	if s.Host == "" {
-		return nil, fmt.Errorf("importer: swagger 2.0 spec has empty host — cannot construct full URLs")
-	}
-	base := scheme + "://" + s.Host + s.BasePath
 
 	cfg := &config.Config{
 		Schema:  SchemaURL,
