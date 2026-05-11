@@ -12,6 +12,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -90,28 +91,43 @@ func (e *Endpoint) ParsedTimeout() (time.Duration, error) {
 // so a typo like "url:" → "ulr:" surfaces immediately instead of being
 // silently ignored.
 func Load(path string) (*Config, error) {
-	f, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("config: opening %s: %w", path, err)
 	}
-	defer f.Close()
-
-	dec := json.NewDecoder(f)
-	dec.DisallowUnknownFields()
-
-	var c Config
-	if err := dec.Decode(&c); err != nil {
+	c, err := Parse(data)
+	if err != nil {
 		return nil, fmt.Errorf("config: parsing %s: %w", path, err)
 	}
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
-	c.applyDefaults()
+	c.ApplyDefaults()
+	return c, nil
+}
+
+// Parse decodes raw JSON bytes into a Config without validating or
+// applying defaults. Callers that already have the bytes in memory
+// (e.g. for cache hashing) can use this to avoid a second file read.
+//
+// Unknown fields are still rejected — Parse is structurally strict;
+// only the semantic Validate step is skipped. The returned error is
+// the raw decoder error so callers can wrap it with their own
+// context (path, source, etc.).
+func Parse(data []byte) (*Config, error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+
+	var c Config
+	if err := dec.Decode(&c); err != nil {
+		return nil, err
+	}
 	return &c, nil
 }
 
 // schemaVersionRe extracts the vN segment from a $schema URL such as
-//   https://.../schemas/v1/config.schema.json
+//
+//	https://.../schemas/v1/config.schema.json
 var schemaVersionRe = regexp.MustCompile(`/schemas/v(\d+)/`)
 
 // Validate enforces the contract documented in the JSON Schema and
@@ -173,9 +189,10 @@ func (e *Endpoint) validate(method string, index int) error {
 	return nil
 }
 
-// applyDefaults fills zero-valued fields with their defaults so callers
-// don't need to second-guess what 0/empty means.
-func (c *Config) applyDefaults() {
+// ApplyDefaults fills zero-valued fields with their defaults so callers
+// don't need to second-guess what 0/empty means. Idempotent — calling
+// it twice produces the same result.
+func (c *Config) ApplyDefaults() {
 	for _, g := range c.Groups() {
 		for i := range g.Endpoints {
 			ep := &g.Endpoints[i]

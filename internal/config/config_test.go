@@ -158,6 +158,105 @@ func TestGroups_StableOrder(t *testing.T) {
 	}
 }
 
+// ---- Parse (bytes-only path) ---------------------------------------------
+
+func TestParse_DoesNotValidate(t *testing.T) {
+	// Missing "version" would fail Validate, but Parse should accept it.
+	raw := []byte(`{"GET":[{"url":"https://example.com/"}]}`)
+	c, err := Parse(raw)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if c.Version != 0 {
+		t.Errorf("Version = %d, want 0 (Parse should not synthesize one)", c.Version)
+	}
+	if len(c.GET) != 1 {
+		t.Errorf("GET length = %d, want 1", len(c.GET))
+	}
+}
+
+func TestParse_DoesNotApplyDefaults(t *testing.T) {
+	raw := []byte(`{"version":1,"GET":[{"url":"https://example.com/"}]}`)
+	c, err := Parse(raw)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if c.GET[0].Concurrency != 0 {
+		t.Errorf("Concurrency = %d, want 0 (Parse should leave defaults to ApplyDefaults)", c.GET[0].Concurrency)
+	}
+	if c.GET[0].Timeout != "" {
+		t.Errorf("Timeout = %q, want empty", c.GET[0].Timeout)
+	}
+}
+
+func TestParse_RejectsUnknownFields(t *testing.T) {
+	raw := []byte(`{"version":1,"GET":[{"url":"https://example.com/","banana":true}]}`)
+	_, err := Parse(raw)
+	if err == nil {
+		t.Fatal("expected unknown-field error")
+	}
+	if !strings.Contains(err.Error(), "banana") {
+		t.Errorf("error should name the offending field, got: %v", err)
+	}
+}
+
+func TestParse_RejectsMalformedJSON(t *testing.T) {
+	_, err := Parse([]byte(`{"version":1,`))
+	if err == nil {
+		t.Fatal("expected JSON syntax error")
+	}
+}
+
+func TestParse_DoesNotWrapPath(t *testing.T) {
+	// Parse error messages should not include "parsing <path>" — that
+	// wrapping belongs to Load, which has the path; Parse callers do
+	// their own wrapping.
+	_, err := Parse([]byte(`{not json`))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), "config: parsing") {
+		t.Errorf("Parse should not prepend 'config: parsing' wrapper, got: %v", err)
+	}
+}
+
+// ---- ApplyDefaults (called directly, not via Load) ----------------------
+
+func TestApplyDefaults_FillsZeroFields(t *testing.T) {
+	c := &Config{
+		Version: 1,
+		GET:     []Endpoint{{URL: "https://example.com/"}},
+	}
+	c.ApplyDefaults()
+	g := c.GET[0]
+	if g.Concurrency != DefaultConcurrency {
+		t.Errorf("Concurrency = %d, want %d", g.Concurrency, DefaultConcurrency)
+	}
+	if g.Requests != DefaultRequests {
+		t.Errorf("Requests = %d, want %d", g.Requests, DefaultRequests)
+	}
+	if g.Timeout != DefaultTimeout {
+		t.Errorf("Timeout = %q, want %q", g.Timeout, DefaultTimeout)
+	}
+}
+
+func TestApplyDefaults_AcrossAllGroups(t *testing.T) {
+	c := &Config{
+		Version: 1,
+		GET:     []Endpoint{{URL: "https://example.com/g"}},
+		POST:    []Endpoint{{URL: "https://example.com/p"}},
+		DELETE:  []Endpoint{{URL: "https://example.com/d"}},
+	}
+	c.ApplyDefaults()
+	for _, g := range c.Groups() {
+		for i, ep := range g.Endpoints {
+			if ep.Concurrency != DefaultConcurrency {
+				t.Errorf("%s[%d].Concurrency = %d, want %d", g.Method, i, ep.Concurrency, DefaultConcurrency)
+			}
+		}
+	}
+}
+
 // ---- defaults idempotency ------------------------------------------------
 
 func TestApplyDefaults_DoesNotOverrideExplicitValues(t *testing.T) {
@@ -165,8 +264,8 @@ func TestApplyDefaults_DoesNotOverrideExplicitValues(t *testing.T) {
 		Version: 1,
 		GET:     []Endpoint{{URL: "https://example.com/", Concurrency: 1, Requests: 1, Timeout: "1s"}},
 	}
-	c.applyDefaults()
-	c.applyDefaults() // idempotent
+	c.ApplyDefaults()
+	c.ApplyDefaults() // idempotent
 	g := c.GET[0]
 	if g.Concurrency != 1 || g.Requests != 1 || g.Timeout != "1s" {
 		t.Errorf("explicit values overwritten by defaults: %+v", g)
