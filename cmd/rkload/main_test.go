@@ -1,9 +1,16 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"flag"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/RKInnovate/rkload/internal/cache"
+	"github.com/RKInnovate/rkload/internal/config"
 )
 
 // TestVersionDefaults sanity-checks that the build-time variables have
@@ -158,5 +165,196 @@ func TestRepeatableFlag_NoSetCalls(t *testing.T) {
 	}
 	if len(*values) != 0 {
 		t.Errorf("len = %d, want 0", len(*values))
+	}
+}
+
+// ---- runValidate ---------------------------------------------------------
+//
+// Every test that exercises runValidate redirects the cache to a
+// fresh temp dir via t.Setenv so cache writes don't pollute the
+// user's ~/.rkload/cache during `go test`.
+
+const validConfigJSON = `{
+  "$schema": "https://raw.githubusercontent.com/RKInnovate/rkload/main/schemas/v1/config.schema.json",
+  "version": 1,
+  "GET":  [{"url": "https://example.com/a"}, {"url": "https://example.com/b"}],
+  "POST": [{"url": "https://example.com/p"}]
+}`
+
+func writeTempConfig(t *testing.T, content string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rkload.config.json")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	return path
+}
+
+func TestRunValidate_SuccessWritesCacheEntry(t *testing.T) {
+	cacheDir := t.TempDir()
+	t.Setenv(cache.EnvDirOverride, cacheDir)
+	path := writeTempConfig(t, validConfigJSON)
+
+	var out, errOut bytes.Buffer
+	if code := runValidate(&out, &errOut, path, false); code != 0 {
+		t.Fatalf("exit code = %d (stderr: %s)", code, errOut.String())
+	}
+	entries, _ := os.ReadDir(cacheDir)
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 cache entry, got %d", len(entries))
+	}
+	if !strings.HasSuffix(entries[0].Name(), ".json") {
+		t.Errorf("cache file name = %q, want .json suffix", entries[0].Name())
+	}
+}
+
+func TestRunValidate_NoCacheFlagSuppressesWrite(t *testing.T) {
+	cacheDir := t.TempDir()
+	t.Setenv(cache.EnvDirOverride, cacheDir)
+	path := writeTempConfig(t, validConfigJSON)
+
+	var out, errOut bytes.Buffer
+	if code := runValidate(&out, &errOut, path, true); code != 0 {
+		t.Fatalf("exit code = %d (stderr: %s)", code, errOut.String())
+	}
+	if entries, _ := os.ReadDir(cacheDir); len(entries) != 0 {
+		t.Errorf("-no-cache should not write entries, found %d", len(entries))
+	}
+	if !strings.Contains(out.String(), "no (-no-cache)") {
+		t.Errorf("summary should report 'no (-no-cache)', got:\n%s", out.String())
+	}
+}
+
+func TestRunValidate_SummaryContainsExpectedFields(t *testing.T) {
+	t.Setenv(cache.EnvDirOverride, t.TempDir())
+	path := writeTempConfig(t, validConfigJSON)
+
+	var out, errOut bytes.Buffer
+	if code := runValidate(&out, &errOut, path, false); code != 0 {
+		t.Fatalf("exit code = %d", code)
+	}
+	got := out.String()
+	for _, want := range []string{
+		"Validated:", "Status:    valid", "Hash:", "Size:",
+		"Schema:", "Version:   1", "Endpoints: GET=2, POST=1 (total: 3)", "Cached:",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("summary missing %q. Full output:\n%s", want, got)
+		}
+	}
+}
+
+func TestRunValidate_MissingFile(t *testing.T) {
+	t.Setenv(cache.EnvDirOverride, t.TempDir())
+	var out, errOut bytes.Buffer
+	code := runValidate(&out, &errOut, "/no/such/path/rkload.json", false)
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
+	}
+	if errOut.Len() == 0 {
+		t.Errorf("expected error message on stderr")
+	}
+}
+
+func TestRunValidate_InvalidConfigRejected(t *testing.T) {
+	t.Setenv(cache.EnvDirOverride, t.TempDir())
+	// Missing required "version" field.
+	path := writeTempConfig(t, `{"GET":[{"url":"https://example.com/"}]}`)
+
+	var out, errOut bytes.Buffer
+	if code := runValidate(&out, &errOut, path, false); code != 1 {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	if !strings.Contains(errOut.String(), "version") {
+		t.Errorf("expected version error on stderr, got: %s", errOut.String())
+	}
+}
+
+func TestRunValidate_UnknownFieldRejected(t *testing.T) {
+	t.Setenv(cache.EnvDirOverride, t.TempDir())
+	path := writeTempConfig(t, `{"version":1,"TRACE":[{"url":"https://example.com/"}]}`)
+
+	var out, errOut bytes.Buffer
+	if code := runValidate(&out, &errOut, path, false); code != 1 {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	if !strings.Contains(errOut.String(), "TRACE") {
+		t.Errorf("error should name the unknown field, got: %s", errOut.String())
+	}
+}
+
+func TestRunValidate_RecordsAbsolutePath(t *testing.T) {
+	cacheDir := t.TempDir()
+	t.Setenv(cache.EnvDirOverride, cacheDir)
+	path := writeTempConfig(t, validConfigJSON)
+
+	// Pass a relative-ish path (basename only, with chdir) so we can
+	// verify the entry stores the absolute path.
+	dir := filepath.Dir(path)
+	cwd, _ := os.Getwd()
+	defer os.Chdir(cwd)
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	var out, errOut bytes.Buffer
+	if code := runValidate(&out, &errOut, "rkload.config.json", false); code != 0 {
+		t.Fatalf("exit code = %d (stderr: %s)", code, errOut.String())
+	}
+	entries, _ := os.ReadDir(cacheDir)
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 cache entry, got %d", len(entries))
+	}
+	raw, _ := os.ReadFile(filepath.Join(cacheDir, entries[0].Name()))
+	// macOS resolves /var → /private/var; both forms count as
+	// absolute, so don't pin the exact prefix — check that the path
+	// is absolute and ends with the expected filename.
+	var got struct {
+		ConfigPath string `json:"config_path"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("entry was not valid JSON: %v", err)
+	}
+	if !filepath.IsAbs(got.ConfigPath) {
+		t.Errorf("config_path %q is not absolute", got.ConfigPath)
+	}
+	if filepath.Base(got.ConfigPath) != "rkload.config.json" {
+		t.Errorf("config_path basename = %q, want rkload.config.json", filepath.Base(got.ConfigPath))
+	}
+}
+
+// ---- endpointCounts ------------------------------------------------------
+
+func TestEndpointCounts_OmitsEmptyMethods(t *testing.T) {
+	cfg := &config.Config{
+		Version: 1,
+		GET:     []config.Endpoint{{URL: "https://x/a"}, {URL: "https://x/b"}},
+		POST:    []config.Endpoint{{URL: "https://x/p"}},
+	}
+	got := endpointCounts(cfg)
+	if got["GET"] != 2 || got["POST"] != 1 || got["total"] != 3 {
+		t.Errorf("counts = %v, want GET=2 POST=1 total=3", got)
+	}
+	if _, ok := got["PUT"]; ok {
+		t.Errorf("PUT should be absent when no endpoints declared, got: %v", got)
+	}
+}
+
+func TestFormatCounts_StableOrder(t *testing.T) {
+	// PUT before DELETE before HEAD — alphabetical order would break
+	// this; methodOrder preserves the canonical sequence.
+	counts := map[string]int{"HEAD": 1, "DELETE": 1, "PUT": 1, "total": 3}
+	got := formatCounts(counts)
+	want := "PUT=1, DELETE=1, HEAD=1"
+	if got != want {
+		t.Errorf("formatCounts = %q, want %q", got, want)
+	}
+}
+
+func TestFormatCounts_NoneFallback(t *testing.T) {
+	got := formatCounts(map[string]int{"total": 0})
+	if got != "none" {
+		t.Errorf("formatCounts(empty) = %q, want %q", got, "none")
 	}
 }

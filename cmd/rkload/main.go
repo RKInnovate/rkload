@@ -9,9 +9,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/RKInnovate/rkload/internal/cache"
 	"github.com/RKInnovate/rkload/internal/config"
 	"github.com/RKInnovate/rkload/internal/importer"
 	"github.com/RKInnovate/rkload/internal/loader"
@@ -27,10 +29,15 @@ var (
 
 func main() {
 	// Subcommand dispatch comes first so `rkload import openapi spec.yaml`
-	// doesn't get parsed by the top-level flag set (which would reject
-	// the unknown positional argument).
-	if len(os.Args) > 1 && os.Args[1] == "import" {
-		os.Exit(importMain(os.Args[2:]))
+	// (and friends) don't get parsed by the top-level flag set, which
+	// would reject the unknown positional argument.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "import":
+			os.Exit(importMain(os.Args[2:]))
+		case "validate":
+			os.Exit(validateMain(os.Args[2:]))
+		}
 	}
 
 	os.Exit(runMain())
@@ -91,6 +98,7 @@ func printRootUsage() {
 	fmt.Fprintln(os.Stderr, "Usage:")
 	fmt.Fprintln(os.Stderr, "  rkload -url <URL> [-c N] [-n N] [-method M]   single-endpoint mode")
 	fmt.Fprintln(os.Stderr, "  rkload -config <FILE>                         multi-endpoint mode (JSON config)")
+	fmt.Fprintln(os.Stderr, "  rkload validate <FILE> [--no-cache]           validate a config and record metadata")
 	fmt.Fprintln(os.Stderr, "  rkload import {openapi|postman} <FILE> [...]  generate a config from a spec")
 	fmt.Fprintln(os.Stderr, "  rkload -version                               print version and exit")
 	fmt.Fprintln(os.Stderr, "")
@@ -324,6 +332,145 @@ func importPostman(args []string) int {
 	}
 
 	return writeConfigJSON(cfg, *output)
+}
+
+// validateMain handles `rkload validate <config>`. It parses the
+// subcommand flags, then delegates to runValidate so the core logic
+// stays testable without going through os.Args / os.Exit.
+func validateMain(args []string) int {
+	fs := flag.NewFlagSet("rkload validate", flag.ContinueOnError)
+	noCache := fs.Bool("no-cache", false, "Skip reading and writing the validation cache")
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "Usage: rkload validate <config> [flags]")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Validates a JSON config against the schema, prints a summary of")
+		fmt.Fprintln(os.Stderr, "the file (hash, size, per-method endpoint counts), and records the")
+		fmt.Fprintln(os.Stderr, "result in the validation cache (~/.rkload/cache/ by default; set")
+		fmt.Fprintln(os.Stderr, "RKLOAD_CACHE_DIR to override). On a subsequent `rkload -config`")
+		fmt.Fprintln(os.Stderr, "run, a cached hash match skips re-validation.")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Flags:")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+	if fs.NArg() != 1 {
+		fs.Usage()
+		return 1
+	}
+	return runValidate(os.Stdout, os.Stderr, fs.Arg(0), *noCache)
+}
+
+// runValidate is the testable core of `rkload validate`. Returns 0 on
+// a clean validation, 1 on any failure (file missing, parse error,
+// validation error). A cache write failure does not flip the exit
+// code — the validation succeeded; the record-keeping didn't.
+func runValidate(out, errOut io.Writer, path string, noCache bool) int {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintln(errOut, err)
+		return 1
+	}
+	cfg, err := config.Parse(data)
+	if err != nil {
+		fmt.Fprintf(errOut, "config: parsing %s: %v\n", path, err)
+		return 1
+	}
+	if err := cfg.Validate(); err != nil {
+		fmt.Fprintln(errOut, err)
+		return 1
+	}
+	cfg.ApplyDefaults()
+
+	hash, err := cache.CanonicalHash(data)
+	if err != nil {
+		fmt.Fprintln(errOut, err)
+		return 1
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		absPath = path
+	}
+	var size int64
+	if fi, statErr := os.Stat(path); statErr == nil {
+		size = fi.Size()
+	}
+	counts := endpointCounts(cfg)
+	entry := &cache.Entry{
+		Hash:           hash,
+		ValidatedAt:    time.Now().UTC(),
+		RkloadVersion:  version,
+		ConfigPath:     absPath,
+		FileSizeBytes:  size,
+		SchemaURL:      cfg.Schema,
+		SchemaVersion:  cfg.Version,
+		EndpointCounts: counts,
+		Status:         cache.StatusValid,
+	}
+
+	var cacheLine string
+	switch {
+	case noCache:
+		cacheLine = "no (-no-cache)"
+	default:
+		if storeErr := cache.Store(entry); storeErr != nil {
+			cacheLine = fmt.Sprintf("no (write failed: %v)", storeErr)
+		} else {
+			dir, _ := cache.Dir()
+			cacheLine = fmt.Sprintf("yes (%s)", filepath.Join(dir, hash+".json"))
+		}
+	}
+
+	printValidateSummary(out, absPath, hash, size, cfg, counts, cacheLine)
+	return 0
+}
+
+// endpointCounts returns a map of method → endpoint count with a
+// synthesised "total" key, so the cache entry can render summaries
+// without re-walking the config.
+func endpointCounts(cfg *config.Config) map[string]int {
+	counts := map[string]int{}
+	total := 0
+	for _, g := range cfg.Groups() {
+		if n := len(g.Endpoints); n > 0 {
+			counts[g.Method] = n
+			total += n
+		}
+	}
+	counts["total"] = total
+	return counts
+}
+
+// methodOrder is the stable display order for endpoint counts and
+// matches config.Config.Groups() so output is identical to how the
+// run flow walks endpoints.
+var methodOrder = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
+
+func formatCounts(counts map[string]int) string {
+	var parts []string
+	for _, m := range methodOrder {
+		if n := counts[m]; n > 0 {
+			parts = append(parts, fmt.Sprintf("%s=%d", m, n))
+		}
+	}
+	if len(parts) == 0 {
+		return "none"
+	}
+	return strings.Join(parts, ", ")
+}
+
+func printValidateSummary(w io.Writer, path, hash string, size int64, cfg *config.Config, counts map[string]int, cacheLine string) {
+	fmt.Fprintf(w, "Validated: %s\n", path)
+	fmt.Fprintf(w, "  Status:    %s\n", cache.StatusValid)
+	fmt.Fprintf(w, "  Hash:      %s\n", hash)
+	fmt.Fprintf(w, "  Size:      %d bytes\n", size)
+	if cfg.Schema != "" {
+		fmt.Fprintf(w, "  Schema:    %s\n", cfg.Schema)
+	}
+	fmt.Fprintf(w, "  Version:   %d\n", cfg.Version)
+	fmt.Fprintf(w, "  Endpoints: %s (total: %d)\n", formatCounts(counts), counts["total"])
+	fmt.Fprintf(w, "  Cached:    %s\n", cacheLine)
 }
 
 // repeatableFlag is a tiny implementation of a -var key=value flag
