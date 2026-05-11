@@ -72,6 +72,10 @@ func runMain() int {
 		return 0
 	}
 
+	// Daily update notice — silent on errors, skipped for dev builds,
+	// non-tty stdout, or RKLOAD_NO_UPDATE_CHECK=1.
+	maybePrintUpdateNotice(os.Stderr, isTerminal(os.Stdout))
+
 	if *configPath != "" && *url != "" {
 		fmt.Fprintln(os.Stderr, "Error: -config and -url are mutually exclusive")
 		return 1
@@ -413,6 +417,66 @@ func loadAndValidateForRun(path string) (*config.Config, string, error) {
 		return cfg, fmt.Sprintf("re-checked (cache write failed: %v)", storeErr), nil
 	}
 	return cfg, "re-checked and cached", nil
+}
+
+// maybePrintUpdateNotice runs the once-per-day update check and
+// prints a one-line notice to out when a newer release exists.
+// Failures are silent — a network blip should never disrupt a
+// load test or stand between the user and their command. Skipped
+// for:
+//
+//   - "dev" / "unknown" / *-snapshot builds (local dev — noisy)
+//   - RKLOAD_NO_UPDATE_CHECK=1 (explicit opt-out)
+//   - non-tty stdout (piped, redirected, CI — the notice would
+//     pollute machine-readable output)
+//
+// The tty bool is injected so tests can exercise the print path
+// without faking a terminal.
+func maybePrintUpdateNotice(out io.Writer, tty bool) {
+	if !tty {
+		return
+	}
+	if version == "dev" || version == "unknown" {
+		return
+	}
+	if os.Getenv("RKLOAD_NO_UPDATE_CHECK") == "1" {
+		return
+	}
+
+	state, err := updater.LoadState()
+	if err != nil || state == nil {
+		state = &updater.State{}
+	}
+
+	latest := state.LatestVersionSeen
+	if updater.ShouldCheck(state, time.Now(), 24*time.Hour) {
+		rel, err := updater.Latest(nil)
+		if err != nil {
+			return // silent
+		}
+		latest = rel.Tag
+		state.LastCheckedAt = time.Now()
+		state.LatestVersionSeen = latest
+		_ = updater.SaveState(state)
+	}
+	if latest == "" {
+		return
+	}
+	newer, err := updater.Newer(version, latest)
+	if err != nil || !newer {
+		return
+	}
+	fmt.Fprintf(out, "[update available] rkload %s — run `rkload update` to upgrade\n\n", latest)
+}
+
+// isTerminal reports whether f refers to a character device (a tty).
+// Cheap stdlib-only check — no /x/term dependency.
+func isTerminal(f *os.File) bool {
+	stat, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return (stat.Mode() & os.ModeCharDevice) != 0
 }
 
 // updateMain handles `rkload update`. The thin wrapper resolves

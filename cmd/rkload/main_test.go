@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/RKInnovate/rkload/internal/cache"
 	"github.com/RKInnovate/rkload/internal/config"
@@ -173,6 +174,140 @@ func TestRepeatableFlag_NoSetCalls(t *testing.T) {
 	}
 	if len(*values) != 0 {
 		t.Errorf("len = %d, want 0", len(*values))
+	}
+}
+
+// ---- maybePrintUpdateNotice ---------------------------------------------
+//
+// The daily notice has several silent-skip conditions. The tests
+// pin every one of them plus the happy path so a future refactor
+// doesn't accidentally lose an opt-out.
+
+func setVersion(t *testing.T, v string) {
+	t.Helper()
+	saved := version
+	version = v
+	t.Cleanup(func() { version = saved })
+}
+
+func TestMaybePrintUpdateNotice_NonTtySkipped(t *testing.T) {
+	setVersion(t, "v0.3.0")
+	t.Setenv(updater.EnvStateDirOverride, t.TempDir())
+	var buf bytes.Buffer
+	maybePrintUpdateNotice(&buf, false /* tty */)
+	if buf.Len() != 0 {
+		t.Errorf("expected no output when stdout is not a tty; got %q", buf.String())
+	}
+}
+
+func TestMaybePrintUpdateNotice_DevVersionSkipped(t *testing.T) {
+	setVersion(t, "dev")
+	t.Setenv(updater.EnvStateDirOverride, t.TempDir())
+	var buf bytes.Buffer
+	maybePrintUpdateNotice(&buf, true)
+	if buf.Len() != 0 {
+		t.Errorf("dev version should not check; got %q", buf.String())
+	}
+}
+
+func TestMaybePrintUpdateNotice_EnvOptOut(t *testing.T) {
+	setVersion(t, "v0.3.0")
+	t.Setenv(updater.EnvStateDirOverride, t.TempDir())
+	t.Setenv("RKLOAD_NO_UPDATE_CHECK", "1")
+	var buf bytes.Buffer
+	maybePrintUpdateNotice(&buf, true)
+	if buf.Len() != 0 {
+		t.Errorf("RKLOAD_NO_UPDATE_CHECK=1 should silence the notice; got %q", buf.String())
+	}
+}
+
+func TestMaybePrintUpdateNotice_PrintsWhenNewer(t *testing.T) {
+	setVersion(t, "v0.3.0")
+	t.Setenv(updater.EnvStateDirOverride, t.TempDir())
+	fakeGitHubForUpdate(t, "v0.9.0", "linux", "amd64", []byte("ignored"))
+
+	var buf bytes.Buffer
+	maybePrintUpdateNotice(&buf, true)
+	if !strings.Contains(buf.String(), "update available") {
+		t.Errorf("expected update notice; got %q", buf.String())
+	}
+	if !strings.Contains(buf.String(), "v0.9.0") {
+		t.Errorf("notice should name the new version; got %q", buf.String())
+	}
+}
+
+func TestMaybePrintUpdateNotice_NotNewer_NoNotice(t *testing.T) {
+	setVersion(t, "v0.9.0") // ahead of what the fake will offer
+	t.Setenv(updater.EnvStateDirOverride, t.TempDir())
+	fakeGitHubForUpdate(t, "v0.3.0", "linux", "amd64", []byte("ignored"))
+
+	var buf bytes.Buffer
+	maybePrintUpdateNotice(&buf, true)
+	if buf.Len() != 0 {
+		t.Errorf("no notice when current >= latest; got %q", buf.String())
+	}
+}
+
+func TestMaybePrintUpdateNotice_UsesCachedStateWithinADay(t *testing.T) {
+	setVersion(t, "v0.3.0")
+	stateDir := t.TempDir()
+	t.Setenv(updater.EnvStateDirOverride, stateDir)
+
+	// Pre-populate state with a recent check that knows about a newer
+	// version. Do NOT start a fake server — if the function reaches
+	// the network path, it'll point at api.github.com and a) be slow
+	// or b) flake CI. The whole point of this test is that the
+	// cached state path skips the network entirely.
+	state := &updater.State{
+		LastCheckedAt:     time.Now(),
+		LatestVersionSeen: "v0.9.0",
+	}
+	if err := updater.SaveState(state); err != nil {
+		t.Fatalf("seed state: %v", err)
+	}
+
+	// Override the network endpoints to a closed server, so any
+	// accidental call fails fast (and the test still asserts based
+	// on stdout content).
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("network should not be hit when cached state is recent; hit %s", r.URL.Path)
+	}))
+	srv.Close() // start it just to get a URL; closed → connection refused
+	oldAPI, oldRedirect := updater.APIBase, updater.ReleaseRedirectBase
+	updater.APIBase = srv.URL
+	updater.ReleaseRedirectBase = srv.URL
+	t.Cleanup(func() {
+		updater.APIBase = oldAPI
+		updater.ReleaseRedirectBase = oldRedirect
+	})
+
+	var buf bytes.Buffer
+	maybePrintUpdateNotice(&buf, true)
+	if !strings.Contains(buf.String(), "v0.9.0") {
+		t.Errorf("expected cached notice; got %q", buf.String())
+	}
+}
+
+func TestMaybePrintUpdateNotice_NetworkErrorIsSilent(t *testing.T) {
+	setVersion(t, "v0.3.0")
+	t.Setenv(updater.EnvStateDirOverride, t.TempDir())
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+	oldAPI, oldRedirect := updater.APIBase, updater.ReleaseRedirectBase
+	updater.APIBase = srv.URL
+	updater.ReleaseRedirectBase = srv.URL
+	t.Cleanup(func() {
+		updater.APIBase = oldAPI
+		updater.ReleaseRedirectBase = oldRedirect
+	})
+
+	var buf bytes.Buffer
+	maybePrintUpdateNotice(&buf, true)
+	if buf.Len() != 0 {
+		t.Errorf("network failure should be silent; got %q", buf.String())
 	}
 }
 
