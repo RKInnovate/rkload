@@ -28,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pinned) to a file or stdout. Refuses to overwrite an existing
   file without `--force`. Useful for starting from scratch when no
   OpenAPI or Postman input is available
+- `scripts/install.sh` (Linux/macOS) and `scripts/install.ps1`
+  (Windows) one-line installers that fetch the matching GoReleaser
+  archive from GitHub Releases, install `rkload` to a PATH-visible
+  location, and verify with `rkload -version`. Pin a release via
+  `--version v0.3.3`; redirect via `--dir DIR` or
+  `RKLOAD_INSTALL_DIR`
 - Initial repository scaffolding
 - MIT license, contributing guide, code of conduct
 - GitHub Actions CI pipeline (vet, staticcheck, test, build)

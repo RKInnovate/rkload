@@ -89,6 +89,7 @@ A standalone validation step that doubles as a record-keeping cache, so large co
 - [x] Cache write failures reported inline, never fatal — validation succeeded; only the bookkeeping didn't
 - [x] `config.Parse` + exported `Config.ApplyDefaults` so the CLI can split parse-from-validate around the cache lookup
 - [x] `rkload init [path] [--force]` subcommand that writes a starter config so users without an OpenAPI / Postman input can start from a working file
+- [x] One-line installers (`scripts/install.sh`, `scripts/install.ps1`) so users without a Go toolchain can pull the matching release archive and get `rkload` onto their PATH
 
 ---
 

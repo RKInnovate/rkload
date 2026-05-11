@@ -23,7 +23,19 @@ It is built and used by the team at [RK Innovate](https://github.com/RKInnovate)
 
 ## Quick start
 
-Install:
+Install the latest release:
+
+```bash
+# Linux / macOS
+curl -fsSL https://raw.githubusercontent.com/RKInnovate/rkload/main/scripts/install.sh | sh
+
+# Windows (PowerShell)
+iwr https://raw.githubusercontent.com/RKInnovate/rkload/main/scripts/install.ps1 -UseBasicParsing | iex
+```
+
+The installers download the matching binary from [GitHub Releases](https://github.com/RKInnovate/rkload/releases), place it on your `PATH` (`/usr/local/bin`, `~/.local/bin`, or `%LOCALAPPDATA%\rkload\bin`), and verify with `rkload -version`. Both scripts accept a `--version` / `-Version` flag to pin a specific tag and a `--dir` / `-Dir` flag to install elsewhere.
+
+If you have Go on your machine you can also `go install`:
 
 ```bash
 go install github.com/RKInnovate/rkload/cmd/rkload@latest
