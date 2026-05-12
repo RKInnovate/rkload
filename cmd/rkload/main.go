@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -329,16 +330,21 @@ func runFromConfigPlain(bundles []configBundle, jobs []endpointJob) int {
 }
 
 // runFromConfigTUI runs the load test under the live dashboard.
-// A worker goroutine iterates jobs sequentially, feeding the TUI
-// EndpointStart/EndpointEnd messages and routing per-result events
-// through OnResult. After the TUI exits (Done message OR user
-// pressed q), the plain-text aggregate report prints to stdout
-// from the surviving summaries.
+// Endpoints run in PARALLEL — one goroutine per endpoint, each
+// invoking loader.Run independently and feeding its own progress
+// stream into the TUI. The aggregate report after the TUI exits
+// shows the same per-endpoint summaries as before.
 //
-// If the user quits early, in-flight requests on the current
-// endpoint still complete (loader.Run is blocking) and subsequent
-// endpoints are skipped. The exit code is 0 on a clean user quit
-// even if errors accumulated — the user told us to stop.
+// Note that per-endpoint concurrency (`c` in the config) stacks
+// on top of this: 10 endpoints with c=5 means 50 concurrent
+// in-flight requests in total. That's almost always what you
+// want for stress testing (everything hitting the target at
+// once); when it isn't, drop `c` per endpoint.
+//
+// If the user quits early, in-flight requests on every endpoint
+// still complete (loader.Run is blocking; cancellation is a v1.1
+// concern). Exit code is 0 on a clean user quit even if errors
+// accumulated — the user told us to stop.
 func runFromConfigTUI(bundles []configBundle, jobs []endpointJob) int {
 	endpoints := make([]tui.Endpoint, 0, len(jobs))
 	for _, job := range jobs {
@@ -351,23 +357,34 @@ func runFromConfigTUI(bundles []configBundle, jobs []endpointJob) int {
 		summaries     = make([]report.Summary, len(jobs))
 		summariesDone = make([]bool, len(jobs))
 		quitRequested atomic.Bool
+		runStart      = time.Now()
 		workerDone    = make(chan struct{})
 	)
 
 	go func() {
 		defer close(workerDone)
+		// Fan out: every endpoint runs concurrently in its own
+		// goroutine. A WaitGroup gates the Done message until all
+		// have finished naturally OR the user has quit and the
+		// in-flight batches drain.
+		var wg sync.WaitGroup
 		for _, job := range jobs {
 			if quitRequested.Load() {
 				break
 			}
-			program.Send(tui.EndpointStart{Index: job.idx})
-			summary := runOneEndpoint(job, func(r loader.Result) {
-				program.Send(tui.Result(job.idx, r))
-			})
-			summaries[job.idx] = summary
-			summariesDone[job.idx] = true
-			program.Send(tui.EndpointEnd{Index: job.idx})
+			wg.Add(1)
+			go func(j endpointJob) {
+				defer wg.Done()
+				program.Send(tui.EndpointStart{Index: j.idx})
+				summary := runOneEndpoint(j, func(r loader.Result) {
+					program.Send(tui.Result(j.idx, r))
+				})
+				summaries[j.idx] = summary
+				summariesDone[j.idx] = true
+				program.Send(tui.EndpointEnd{Index: j.idx})
+			}(job)
 		}
+		wg.Wait()
 		program.Send(tui.Done{})
 	}()
 
@@ -376,46 +393,25 @@ func runFromConfigTUI(bundles []configBundle, jobs []endpointJob) int {
 		quitRequested.Store(true)
 	}
 	<-workerDone
+	totalElapsed := time.Since(runStart)
 
 	if runErr != nil {
 		fmt.Fprintln(os.Stderr, "TUI error:", runErr)
 		return 1
 	}
 
-	// Plain-text final report — same content as the no-TTY path,
-	// so logs / pipes still get the readable summary.
-	printBundlesHeader(bundles)
+	// Compact post-TUI summary: a single-screen recap rather than
+	// reprinting the verbose per-endpoint report we already showed
+	// live. Users who want the full breakdown can re-run with
+	// stdout piped (which uses the plain-text path automatically).
+	printCompactSummary(bundles, jobs, summaries, summariesDone, totalElapsed)
 
-	var totalRequests, totalErrors, endpointsDone int
+	totalErrors := 0
 	for _, job := range jobs {
-		if !summariesDone[job.idx] {
-			continue
+		if summariesDone[job.idx] {
+			totalErrors += summaries[job.idx].Errors
 		}
-		summary := summaries[job.idx]
-		label := job.ep.Name
-		if label == "" {
-			label = job.ep.URL
-		}
-		fmt.Printf("=== %s %s ===\n", job.method, label)
-		fmt.Printf("URL:     %s\n", job.ep.URL)
-		fmt.Printf("Workers: %d | Requests: %d | Timeout: %s\n\n",
-			job.ep.Concurrency, job.ep.Requests, job.ep.Timeout)
-		report.Print(os.Stdout, summary)
-		fmt.Println()
-
-		totalRequests += summary.Total
-		totalErrors += summary.Errors
-		endpointsDone++
 	}
-
-	fmt.Printf("=== Overall ===\n")
-	fmt.Printf("Endpoints tested: %d\n", endpointsDone)
-	if endpointsDone < len(jobs) {
-		fmt.Printf("Endpoints skipped: %d (user quit)\n", len(jobs)-endpointsDone)
-	}
-	fmt.Printf("Total requests:   %d\n", totalRequests)
-	fmt.Printf("Total errors:     %d\n", totalErrors)
-
 	if userQuit {
 		return 0
 	}
@@ -423,6 +419,122 @@ func runFromConfigTUI(bundles []configBundle, jobs []endpointJob) int {
 		return 1
 	}
 	return 0
+}
+
+// printCompactSummary writes a one-screen-ish recap of a finished
+// TUI run: per-endpoint totals (no histograms), aggregate status +
+// latency + throughput. Designed to leave roughly the same density
+// of information in the terminal scrollback as the TUI showed in
+// its final frame, minus the ANSI styling.
+func printCompactSummary(bundles []configBundle, jobs []endpointJob,
+	summaries []report.Summary, done []bool, elapsed time.Duration) {
+
+	totalRequests, totalErrors, endpointsDone := 0, 0, 0
+	allStatus := map[int]int{}
+
+	for _, job := range jobs {
+		if !done[job.idx] {
+			continue
+		}
+		s := summaries[job.idx]
+		totalRequests += s.Total
+		totalErrors += s.Errors
+		endpointsDone++
+		for code, n := range s.StatusCodes {
+			allStatus[code] += n
+		}
+	}
+
+	fmt.Println()
+	fmt.Printf("rkload — done   %s\n",
+		fmt.Sprintf("Configs: %d   Endpoints: %d   Requests: %d   Elapsed: %s",
+			len(bundles), endpointsDone, totalRequests, formatShortDuration(elapsed)))
+	if endpointsDone < len(jobs) {
+		fmt.Printf("                Skipped: %d (user quit)\n", len(jobs)-endpointsDone)
+	}
+	fmt.Println()
+
+	// Per-endpoint one-liner.
+	maxLabel := 0
+	for _, job := range jobs {
+		label := fmt.Sprintf("%s %s", job.method, endpointLabel(job.ep))
+		if len(label) > maxLabel {
+			maxLabel = len(label)
+		}
+	}
+	if maxLabel > 50 {
+		maxLabel = 50
+	}
+	for _, job := range jobs {
+		if !done[job.idx] {
+			continue
+		}
+		s := summaries[job.idx]
+		label := fmt.Sprintf("%s %s", job.method, endpointLabel(job.ep))
+		if len(label) > maxLabel {
+			label = label[:maxLabel-1] + "…"
+		}
+		status := "✓"
+		if s.Errors > 0 {
+			status = "✗"
+		}
+		fmt.Printf("  %s %-*s  %4d/%-4d  %6.1f r/s  p95 %s\n",
+			status, maxLabel, label,
+			s.Successful, s.Total,
+			s.Throughput,
+			formatShortDuration(s.P95Latency),
+		)
+	}
+	fmt.Println()
+
+	// Aggregate.
+	if len(allStatus) > 0 {
+		var codes []int
+		for c := range allStatus {
+			codes = append(codes, c)
+		}
+		sort.Ints(codes)
+		var parts []string
+		for _, c := range codes {
+			parts = append(parts, fmt.Sprintf("%d:%d", c, allStatus[c]))
+		}
+		fmt.Printf("Status:  %s\n", strings.Join(parts, "  "))
+	}
+	if totalErrors > 0 {
+		fmt.Printf("Errors:  %d\n", totalErrors)
+	}
+	if elapsed > 0 && totalRequests > 0 {
+		fmt.Printf("Avg throughput: %.1f r/s\n", float64(totalRequests)/elapsed.Seconds())
+	}
+}
+
+func endpointLabel(ep config.Endpoint) string {
+	if ep.Name != "" {
+		return ep.Name
+	}
+	return ep.URL
+}
+
+// formatShortDuration mirrors the TUI's compact duration style
+// (used inside the recap line so the two views look consistent).
+func formatShortDuration(d time.Duration) string {
+	if d <= 0 {
+		return "0s"
+	}
+	switch {
+	case d < time.Microsecond:
+		return fmt.Sprintf("%dns", d.Nanoseconds())
+	case d < time.Millisecond:
+		return fmt.Sprintf("%dµs", d.Microseconds())
+	case d < time.Second:
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	case d < time.Minute:
+		return fmt.Sprintf("%.2fs", d.Seconds())
+	default:
+		mins := int(d.Minutes())
+		secs := int(d.Seconds()) - mins*60
+		return fmt.Sprintf("%dm%02ds", mins, secs)
+	}
 }
 
 // runOneEndpoint runs a single endpoint to completion and returns
