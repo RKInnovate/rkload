@@ -36,15 +36,48 @@ func (m Model) View() string {
 }
 
 func (m Model) renderOverview() string {
+	// Allocate vertical real estate based on terminal height. The
+	// throughput chart and aggregate stats are fixed-height; the
+	// endpoint table takes whatever's left. When the terminal is
+	// very short, the chart shrinks down to a minimum.
+	const (
+		headerLines        = 2 // title line + blank
+		aggregateTextLines = 2 // status codes + latency
+		chartLabelLines    = 1 // "Throughput   X.X r/s"
+		footerLines        = 2 // blank + key hints
+	)
+	chartHeight := m.chartHeight()
+	chrome := headerLines + aggregateTextLines + chartLabelLines + chartHeight + footerLines
+	tableBudget := m.height - chrome
+	if tableBudget < 4 { // border (top + bottom) + header + 1 row minimum
+		tableBudget = 4
+	}
+
 	var b strings.Builder
 	b.WriteString(m.renderHeader())
 	b.WriteString("\n\n")
-	b.WriteString(m.renderEndpointTable())
+	b.WriteString(m.renderEndpointTable(tableBudget))
 	b.WriteString("\n\n")
-	b.WriteString(m.renderAggregate())
+	b.WriteString(m.renderAggregate(chartHeight))
 	b.WriteString("\n\n")
 	b.WriteString(m.renderFooter())
 	return b.String()
+}
+
+// chartHeight returns how tall to render the throughput chart for
+// the current terminal height. 8 rows is the sweet spot when there's
+// room; we degrade gracefully when there isn't.
+func (m Model) chartHeight() int {
+	switch {
+	case m.height <= 0: // first render before WindowSizeMsg
+		return 8
+	case m.height < 18:
+		return 3
+	case m.height < 28:
+		return 5
+	default:
+		return 8
+	}
 }
 
 func (m Model) renderHeader() string {
@@ -72,7 +105,15 @@ func (m Model) renderHeader() string {
 // column derived from per-endpoint state. Selected row gets a
 // blue highlight; row colour also reflects status (dim for
 // waiting, pink for running, green for done, red for errored).
-func (m Model) renderEndpointTable() string {
+//
+// budget is the total number of terminal rows available for the
+// table (borders + header + data rows). When the endpoint count
+// exceeds the budget, we slice a window around selectedIdx so the
+// selected endpoint stays visible. An "... N more" hint marks the
+// hidden ranges so the user knows what they aren't seeing.
+func (m Model) renderEndpointTable(budget int) string {
+	startIdx, endIdx := m.windowedEndpoints(budget)
+
 	t := table.New().
 		Border(lipgloss.RoundedBorder()).
 		BorderStyle(borderStyle).
@@ -81,27 +122,27 @@ func (m Model) renderEndpointTable() string {
 			if row == table.HeaderRow {
 				return headerStyle.Padding(0, 1).Align(lipgloss.Left)
 			}
-			// Body cell — figure out per-endpoint state colour, then
-			// override with the selection highlight when applicable.
 			base := lipgloss.NewStyle().Padding(0, 1)
-			// Right-align the numeric columns for readability.
 			if col >= 4 {
 				base = base.Align(lipgloss.Right)
 			}
-			if row < 0 || row >= len(m.states) {
+			// row indexes the rendered slice — translate back to the
+			// real endpoint index to look up state + selection.
+			realIdx := startIdx + row
+			if realIdx < 0 || realIdx >= len(m.states) {
 				return base
 			}
-			s := &m.states[row]
+			s := &m.states[realIdx]
 			styled := base.Foreground(statusColor(s))
-			if row == m.selectedIdx && !m.drillMode {
+			if realIdx == m.selectedIdx && !m.drillMode {
 				styled = styled.Bold(true).Foreground(lipgloss.Color("33"))
 			}
 			return styled
 		})
 
 	now := time.Now()
-	for i, ep := range m.endpoints {
-		s := &m.states[i]
+	for i := startIdx; i < endIdx; i++ {
+		ep, s := m.endpoints[i], &m.states[i]
 		t.Row(
 			statusLabel(s),
 			ep.Method,
@@ -112,7 +153,55 @@ func (m Model) renderEndpointTable() string {
 			formatDuration(percentile(append([]time.Duration(nil), s.latencies...), 95)),
 		)
 	}
-	return t.Render()
+
+	out := t.Render()
+	// Append scroll-hint lines so the user knows there's more content.
+	above := startIdx
+	below := len(m.endpoints) - endIdx
+	if above > 0 || below > 0 {
+		hint := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+		var parts []string
+		if above > 0 {
+			parts = append(parts, fmt.Sprintf("↑ %d more", above))
+		}
+		if below > 0 {
+			parts = append(parts, fmt.Sprintf("%d more ↓", below))
+		}
+		out += "\n" + hint.Render(strings.Join(parts, "   "))
+	}
+	return out
+}
+
+// windowedEndpoints returns the [start, end) range of endpoints to
+// render given a total-row budget for the table. The window is
+// anchored to keep selectedIdx visible and prefers to keep the
+// selection in the middle of the visible window when possible.
+//
+// budget includes borders + header rows; data rows = budget - 3.
+func (m Model) windowedEndpoints(budget int) (start, end int) {
+	n := len(m.endpoints)
+	if n == 0 {
+		return 0, 0
+	}
+	dataRows := budget - 3 // top border, header, bottom border
+	if dataRows < 1 {
+		dataRows = 1
+	}
+	if dataRows >= n {
+		return 0, n
+	}
+	// Window centered on selectedIdx, clamped to edges.
+	half := dataRows / 2
+	start = m.selectedIdx - half
+	if start < 0 {
+		start = 0
+	}
+	end = start + dataRows
+	if end > n {
+		end = n
+		start = end - dataRows
+	}
+	return start, end
 }
 
 // statusColor maps an endpoint's current state to its row colour.
@@ -153,8 +242,8 @@ func truncate(s string, n int) string {
 }
 
 // renderAggregate prints the live status histogram, percentile
-// ticker, and throughput sparkline.
-func (m Model) renderAggregate() string {
+// ticker, and the throughput chart spanning chartHeight rows.
+func (m Model) renderAggregate(chartHeight int) string {
 	statuses := map[int]int{}
 	totalErr := 0
 	var allLatencies []time.Duration
@@ -189,18 +278,27 @@ func (m Model) renderAggregate() string {
 	pctile := fmt.Sprintf("p50 %s   p95 %s   p99 %s",
 		formatDuration(p50), formatDuration(p95), formatDuration(p99))
 
-	// Sparkline.
-	spark := renderSparkline(m.throughputHistory)
+	// Multi-row throughput chart. Width: take what we can get from
+	// the terminal, defaulting to 80 if we don't know yet.
+	chartWidth := m.width - 4
+	if chartWidth < 20 {
+		chartWidth = 60
+	}
+	if chartWidth > sparklineWidth {
+		chartWidth = sparklineWidth
+	}
+	chart := renderLineChart(m.throughputHistory, chartWidth, chartHeight)
+
 	currentRPS := 0.0
 	if n := len(m.throughputHistory); n > 0 {
 		currentRPS = m.throughputHistory[n-1]
 	}
-	throughput := fmt.Sprintf("%-40s  %.1f r/s", spark, currentRPS)
 
 	return strings.Join([]string{
 		status.String(),
 		headerStyle.Render("Latency      ") + pctile,
-		headerStyle.Render("Throughput   ") + throughput,
+		chart,
+		headerStyle.Render("Throughput   ") + fmt.Sprintf("%.1f r/s", currentRPS),
 	}, "\n")
 }
 

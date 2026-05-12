@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -180,8 +181,15 @@ func TestUpdate_DoneSetsTerminalStateAndQuits(t *testing.T) {
 
 // ---- View rendering -------------------------------------------------------
 
+// withSize gives the model a terminal-size message so the windowed
+// endpoint table has room for all endpoints. Without this, tests
+// would see "N more ↓" hints for everything past the minimum window.
+func withSize(m Model) Model {
+	return step(m, tea.WindowSizeMsg{Width: 120, Height: 40})
+}
+
 func TestView_OverviewMentionsEachEndpoint(t *testing.T) {
-	m := New(sampleEndpoints())
+	m := withSize(New(sampleEndpoints()))
 	m = step(m, EndpointStart{Index: 0})
 	out := m.View()
 	if !strings.Contains(out, "first") {
@@ -193,7 +201,7 @@ func TestView_OverviewMentionsEachEndpoint(t *testing.T) {
 }
 
 func TestView_OverviewShowsAggregateStatusCounts(t *testing.T) {
-	m := New(sampleEndpoints())
+	m := withSize(New(sampleEndpoints()))
 	m = step(m, EndpointStart{Index: 0})
 	for i := 0; i < 3; i++ {
 		m = step(m, Result(0, loader.Result{Duration: 10 * time.Millisecond, StatusCode: 200}))
@@ -210,8 +218,44 @@ func TestView_OverviewShowsAggregateStatusCounts(t *testing.T) {
 	}
 }
 
+// TestView_LargeListShowsScrollHint — when the terminal is too
+// short for every endpoint, the windowed table should slice and
+// include a "more" hint. Pins the new height-aware rendering.
+func TestView_LargeListShowsScrollHint(t *testing.T) {
+	endpoints := make([]Endpoint, 30)
+	for i := range endpoints {
+		endpoints[i] = Endpoint{Method: "GET", Name: fmt.Sprintf("ep%02d", i), Total: 10}
+	}
+	m := New(endpoints)
+	m = step(m, tea.WindowSizeMsg{Width: 120, Height: 20})
+	out := m.View()
+	if !strings.Contains(out, "more") {
+		t.Errorf("expected a 'more' scroll hint when terminal is short; got:\n%s", out)
+	}
+}
+
+// TestView_WindowFollowsSelection — moving the selection past the
+// visible window should slide the window so the selected row stays
+// on screen.
+func TestView_WindowFollowsSelection(t *testing.T) {
+	endpoints := make([]Endpoint, 30)
+	for i := range endpoints {
+		endpoints[i] = Endpoint{Method: "GET", Name: fmt.Sprintf("ep%02d", i), Total: 10}
+	}
+	m := New(endpoints)
+	m = step(m, tea.WindowSizeMsg{Width: 120, Height: 20})
+	// Move selection to the last endpoint.
+	for i := 0; i < 30; i++ {
+		m = step(m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	out := m.View()
+	if !strings.Contains(out, "ep29") {
+		t.Errorf("view should show the selected endpoint ep29 after scrolling; got:\n%s", out)
+	}
+}
+
 func TestView_DrilldownShowsSelectedEndpoint(t *testing.T) {
-	m := New(sampleEndpoints())
+	m := withSize(New(sampleEndpoints()))
 	m.selectedIdx = 1
 	m.drillMode = true
 	m = step(m, EndpointStart{Index: 1})
