@@ -10,6 +10,96 @@ import (
 	"time"
 )
 
+// TestRun_OnResultCallbackFiresPerResult — the TUI dashboard depends
+// on OnResult being called for every Result before Run returns, in
+// the same order they appear in the returned slice. If this contract
+// drifts, live progress displays will diverge from the final report.
+func TestRun_OnResultCallbackFiresPerResult(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	var (
+		mu    sync.Mutex
+		calls []Result
+	)
+	results := Run(Options{
+		URL:         srv.URL,
+		Method:      "GET",
+		Concurrency: 3,
+		Requests:    15,
+		Timeout:     5 * time.Second,
+		OnResult: func(r Result) {
+			mu.Lock()
+			calls = append(calls, r)
+			mu.Unlock()
+		},
+	})
+
+	if len(calls) != 15 {
+		t.Errorf("OnResult called %d times, want 15", len(calls))
+	}
+	if len(results) != len(calls) {
+		t.Errorf("returned slice length %d != callback count %d", len(results), len(calls))
+	}
+	// Returned slice is built in the SAME order callbacks fire, so each
+	// index must match.
+	for i := range results {
+		if results[i].StatusCode != calls[i].StatusCode {
+			t.Errorf("results[%d].StatusCode = %d but calls[%d].StatusCode = %d",
+				i, results[i].StatusCode, i, calls[i].StatusCode)
+		}
+	}
+}
+
+// TestRun_NilOnResultIsSafe — Options.OnResult is optional. Callers
+// that don't need live progress should be able to leave it nil with
+// no behavioural difference.
+func TestRun_NilOnResultIsSafe(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	results := Run(Options{
+		URL:         srv.URL,
+		Method:      "GET",
+		Concurrency: 2,
+		Requests:    5,
+		Timeout:     5 * time.Second,
+		OnResult:    nil,
+	})
+	if len(results) != 5 {
+		t.Fatalf("got %d results, want 5", len(results))
+	}
+}
+
+// TestRun_OnResultSeesErrors — the callback fires for failed
+// requests too, not just successful ones. The TUI uses this to
+// update the error-class breakdown live.
+func TestRun_OnResultSeesErrors(t *testing.T) {
+	var errCount atomic.Int32
+	results := Run(Options{
+		URL:         "http://127.0.0.1:1", // refused — every request fails
+		Method:      "GET",
+		Concurrency: 2,
+		Requests:    4,
+		Timeout:     500 * time.Millisecond,
+		OnResult: func(r Result) {
+			if r.Err != nil {
+				errCount.Add(1)
+			}
+		},
+	})
+	if errCount.Load() != 4 {
+		t.Errorf("OnResult saw %d errors, want 4", errCount.Load())
+	}
+	if len(results) != 4 {
+		t.Errorf("got %d results, want 4", len(results))
+	}
+}
+
 func TestRun_AllSuccess(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)

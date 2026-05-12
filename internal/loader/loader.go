@@ -26,6 +26,14 @@ type Options struct {
 	// A fresh io.Reader is created per request so the same Body string
 	// can be safely reused across all workers.
 	Body string
+	// OnResult, when non-nil, is invoked synchronously on the goroutine
+	// that drains the results channel for every Result the run produces.
+	// Use it to feed live progress UIs (e.g. the TUI dashboard) without
+	// waiting for Run to return. Must be fast — anything that blocks
+	// here stalls accumulation of the returned slice. Producing-order
+	// matches the order Results appear in the returned slice, so the
+	// final slice is exactly the concatenation of all OnResult calls.
+	OnResult func(Result)
 }
 
 // Result is the outcome of a single HTTP request.
@@ -86,6 +94,9 @@ func Run(opts Options) []Result {
 
 	out := make([]Result, 0, opts.Requests)
 	for r := range results {
+		if opts.OnResult != nil {
+			opts.OnResult(r)
+		}
 		out = append(out, r)
 	}
 	return out
