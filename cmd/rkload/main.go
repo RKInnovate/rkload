@@ -8,7 +8,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -409,6 +411,15 @@ func runFromConfigTUI(bundles []configBundle, jobs []endpointJob) int {
 	// stdout piped (which uses the plain-text path automatically).
 	printCompactSummary(bundles, jobs, summaries, summariesDone, totalElapsed)
 
+	// If any endpoint returned a non-2xx status or had transport
+	// errors, open a pager with the per-endpoint detail. Short
+	// content flies through via `less -F`; long content paginates
+	// and the user q's out. Skipped silently when no pager is
+	// available, when stdout isn't a TTY, or when RKLOAD_NO_PAGER=1.
+	if hasUnexpectedResults(jobs, summaries, summariesDone) {
+		showUnexpectedInPager(jobs, summaries, summariesDone)
+	}
+
 	totalErrors := 0
 	for _, job := range jobs {
 		if summariesDone[job.idx] {
@@ -422,6 +433,157 @@ func runFromConfigTUI(bundles []configBundle, jobs []endpointJob) int {
 		return 1
 	}
 	return 0
+}
+
+// hasUnexpectedResults reports whether any completed endpoint
+// produced a non-2xx response or a transport-level error. Used to
+// decide whether the post-summary pager view is worth opening.
+func hasUnexpectedResults(jobs []endpointJob, summaries []report.Summary, done []bool) bool {
+	for _, job := range jobs {
+		if !done[job.idx] {
+			continue
+		}
+		s := summaries[job.idx]
+		if s.Errors > 0 {
+			return true
+		}
+		for code := range s.StatusCodes {
+			if code < 200 || code >= 300 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// showUnexpectedInPager renders a detailed report of endpoints
+// that produced non-2xx responses or transport errors, then pipes
+// it through $PAGER (default `less -FRX`). Falls back to direct
+// stdout when no pager is available so users without `less`
+// installed still see the content.
+//
+// The pager flags `-FRX` are the canonical "smart pager" combo
+// (also what git uses): -F quits if content fits on one screen,
+// -R preserves ANSI colour, -X doesn't clear the screen on exit.
+func showUnexpectedInPager(jobs []endpointJob, summaries []report.Summary, done []bool) {
+	content := renderUnexpectedReport(jobs, summaries, done)
+	if content == "" {
+		return
+	}
+
+	if os.Getenv("RKLOAD_NO_PAGER") == "1" {
+		fmt.Print(content)
+		return
+	}
+
+	pager := os.Getenv("PAGER")
+	if pager == "" {
+		pager = "less -FRX"
+	}
+
+	cmd := exec.Command("sh", "-c", pager)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		fmt.Print(content)
+		return
+	}
+	if err := cmd.Start(); err != nil {
+		// Pager not installed or unrunnable — fall back to plain
+		// stdout. Silent so we don't pollute the user's terminal
+		// with a "less not found" message they didn't ask for.
+		fmt.Print(content)
+		return
+	}
+	_, _ = io.WriteString(stdin, content)
+	_ = stdin.Close()
+	_ = cmd.Wait()
+}
+
+// renderUnexpectedReport builds the per-endpoint detail block —
+// one bordered table per endpoint that had non-2xx responses or
+// transport errors. Empty string when no endpoint qualifies.
+//
+// Each line is `<code> <name>: <count>` so the output is greppable
+// and the standard-name column lines up across rows.
+func renderUnexpectedReport(jobs []endpointJob, summaries []report.Summary, done []bool) string {
+	border := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	header := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("250"))
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	red := lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
+
+	var b strings.Builder
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("63")).
+		Render("Endpoints with unexpected status codes or transport errors"))
+	b.WriteString("\n\n")
+	b.WriteString(dim.Render("Press q to close, ↑↓ to scroll. " +
+		"Anything outside 2xx is treated as \"unexpected\" by default."))
+	b.WriteString("\n")
+
+	any := false
+	for _, job := range jobs {
+		if !done[job.idx] {
+			continue
+		}
+		s := summaries[job.idx]
+
+		var unexpected []int
+		for code := range s.StatusCodes {
+			if code < 200 || code >= 300 {
+				unexpected = append(unexpected, code)
+			}
+		}
+		if len(unexpected) == 0 && s.Errors == 0 {
+			continue
+		}
+		sort.Ints(unexpected)
+		any = true
+
+		title := fmt.Sprintf("%s %s", job.method, endpointLabel(job.ep))
+		b.WriteString("\n")
+		b.WriteString(red.Render("✗ ") + lipgloss.NewStyle().Bold(true).Render(title))
+		b.WriteString(dim.Render(fmt.Sprintf("    %d total requests, %d errors", s.Total, s.Errors)))
+		b.WriteString("\n")
+
+		t := lgtable.New().
+			Border(lipgloss.NormalBorder()).
+			BorderStyle(border).
+			Headers("CODE", "NAME", "COUNT").
+			StyleFunc(func(row, col int) lipgloss.Style {
+				if row == lgtable.HeaderRow {
+					return header.Padding(0, 1).Align(lipgloss.Left)
+				}
+				base := lipgloss.NewStyle().Padding(0, 1)
+				if col == 2 {
+					base = base.Align(lipgloss.Right)
+				}
+				return base.Foreground(classColorAnsi(0).GetForeground()) // overridden below per row
+			})
+
+		for _, code := range unexpected {
+			t.Row(
+				classColorAnsi(code).Render(fmt.Sprintf("%d", code)),
+				http.StatusText(code),
+				fmt.Sprintf("%d", s.StatusCodes[code]),
+			)
+		}
+		if s.Errors > 0 {
+			t.Row(
+				red.Render("err"),
+				"transport-level (timeout / refused / DNS / TLS / other)",
+				fmt.Sprintf("%d", s.Errors),
+			)
+		}
+		b.WriteString(t.Render())
+		b.WriteString("\n")
+	}
+
+	if !any {
+		return ""
+	}
+	return b.String()
 }
 
 // printCompactSummary writes a one-screen recap of a finished TUI
@@ -471,24 +633,24 @@ func printCompactSummary(bundles []configBundle, jobs []endpointJob,
 	}
 	fmt.Println()
 
-	// Per-endpoint table.
+	// Per-endpoint table with the full percentile set so users
+	// don't have to re-run to see p50/p99.
 	t := lgtable.New().
 		Border(lipgloss.RoundedBorder()).
 		BorderStyle(border).
-		Headers("STATUS", "METHOD", "ENDPOINT", "DONE", "R/S", "P95").
+		Headers("STATUS", "METHOD", "ENDPOINT", "DONE", "R/S", "AVG", "P50", "P95", "P99").
 		StyleFunc(func(row, col int) lipgloss.Style {
 			if row == lgtable.HeaderRow {
 				return header.Padding(0, 1).Align(lipgloss.Left)
 			}
 			base := lipgloss.NewStyle().Padding(0, 1)
+			// Right-align all numeric columns (everything from DONE onward).
 			if col >= 3 {
 				base = base.Align(lipgloss.Right)
 			}
 			if row < 0 {
 				return base
 			}
-			// Map back to the (filtered) jobs list to colour by status.
-			// We rebuild a filtered slice below; row indexes that.
 			return base.Foreground(rowColorFromIndex(row, jobs, summaries, done, greenColor, redColor, dimColor))
 		})
 
@@ -507,7 +669,10 @@ func printCompactSummary(bundles []configBundle, jobs []endpointJob,
 			truncate(endpointLabel(job.ep), 40),
 			fmt.Sprintf("%d/%d", s.Successful, s.Total),
 			fmt.Sprintf("%.1f r/s", s.Throughput),
+			formatShortDuration(s.AvgLatency),
+			formatShortDuration(s.P50Latency),
 			formatShortDuration(s.P95Latency),
+			formatShortDuration(s.P99Latency),
 		)
 	}
 	fmt.Println(t.Render())
