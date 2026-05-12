@@ -660,7 +660,7 @@ func printCompactSummary(bundles []configBundle, jobs []endpointJob,
 		}
 		s := summaries[job.idx]
 		status := "✓ done"
-		if s.Errors > 0 {
+		if summaryHasUnexpected(s) {
 			status = "✗ fail"
 		}
 		t.Row(
@@ -704,6 +704,11 @@ func printCompactSummary(bundles []configBundle, jobs []endpointJob,
 // rowColorFromIndex maps a row index in the rendered (filtered)
 // table back to a status colour. Used by the lipgloss StyleFunc
 // which only gets (row, col) — not the underlying job.
+//
+// "Failed" = transport errors OR any non-2xx responses. The post-
+// summary table now flips a row red when the endpoint only returned
+// non-2xx statuses (which previously displayed green-checkmark
+// success because the loader saw no transport errors).
 func rowColorFromIndex(row int, jobs []endpointJob, summaries []report.Summary,
 	done []bool, greenColor, redColor, dimColor lipgloss.Color) lipgloss.Color {
 	i := 0
@@ -712,7 +717,7 @@ func rowColorFromIndex(row int, jobs []endpointJob, summaries []report.Summary,
 			continue
 		}
 		if i == row {
-			if summaries[job.idx].Errors > 0 {
+			if summaryHasUnexpected(summaries[job.idx]) {
 				return redColor
 			}
 			return greenColor
@@ -720,6 +725,24 @@ func rowColorFromIndex(row int, jobs []endpointJob, summaries []report.Summary,
 		i++
 	}
 	return dimColor
+}
+
+// summaryHasUnexpected reports whether a finished endpoint had any
+// non-2xx response or transport error — i.e. anything a stress
+// tester would consider a failure. Mirrored from
+// internal/tui.hasUnexpectedResults (the TUI's per-endpoint
+// state has the same shape but different types, so we can't
+// share the function directly).
+func summaryHasUnexpected(s report.Summary) bool {
+	if s.Errors > 0 {
+		return true
+	}
+	for code := range s.StatusCodes {
+		if code < 200 || code >= 300 {
+			return true
+		}
+	}
+	return false
 }
 
 // classColorAnsi mirrors the TUI's classColor for the post-run

@@ -204,10 +204,32 @@ func (m Model) windowedEndpoints(budget int) (start, end int) {
 	return start, end
 }
 
+// hasUnexpectedResults reports whether an endpoint had any
+// non-2xx response or transport error — i.e. anything we'd
+// consider a failure from a stress-testing point of view.
+//
+// Today rkload doesn't take a per-endpoint "expected status"
+// config, so 2xx is the only success class. When that changes
+// the logic moves here.
+func hasUnexpectedResults(s *endpointState) bool {
+	if s.errCount > 0 {
+		return true
+	}
+	for code := range s.statusCodes {
+		if code < 200 || code >= 300 {
+			return true
+		}
+	}
+	return false
+}
+
 // statusColor maps an endpoint's current state to its row colour.
+// "Done with no errors AND only 2xx responses" is green; finishing
+// with transport errors OR non-2xx responses turns it red so the
+// row jumps out in scrollback even at a glance.
 func statusColor(s *endpointState) lipgloss.Color {
 	switch {
-	case s.finished && s.errCount > 0:
+	case s.finished && hasUnexpectedResults(s):
 		return lipgloss.Color("203") // red
 	case s.finished:
 		return lipgloss.Color("42") // green
@@ -223,7 +245,7 @@ func statusColor(s *endpointState) lipgloss.Color {
 // all four states so the column stays visually tight.
 func statusLabel(s *endpointState) string {
 	switch {
-	case s.finished && s.errCount > 0:
+	case s.finished && hasUnexpectedResults(s):
 		return "✗ fail"
 	case s.finished:
 		return "✓ done"
