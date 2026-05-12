@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/RKInnovate/rkload/main/schemas/v1/config.schema.json",
+  "version": 1,
+
+  "GET": [
+    {
+      "name": "httpbin-get",
+      "url": "https://httpbin.org/get",
+      "c": 5,
+      "requests": 50,
+      "timeout": "10s"
+    }
+  ]
+}

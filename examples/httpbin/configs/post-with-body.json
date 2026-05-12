@@ -1,0 +1,18 @@
+{
+  "$schema": "https://raw.githubusercontent.com/RKInnovate/rkload/main/schemas/v1/config.schema.json",
+  "version": 1,
+
+  "POST": [
+    {
+      "name": "echo-json",
+      "url": "https://httpbin.org/post",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": "{\"event\":\"checkout\",\"user_id\":42,\"items\":[\"sku-1\",\"sku-2\"],\"total_cents\":1999}",
+      "c": 5,
+      "requests": 50,
+      "timeout": "10s"
+    }
+  ]
+}

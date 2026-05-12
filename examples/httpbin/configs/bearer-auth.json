@@ -1,0 +1,24 @@
+{
+  "$schema": "https://raw.githubusercontent.com/RKInnovate/rkload/main/schemas/v1/config.schema.json",
+  "version": 1,
+
+  "GET": [
+    {
+      "name": "bearer-with-token",
+      "url": "https://httpbin.org/bearer",
+      "headers": {
+        "Authorization": "Bearer demo-token-anything-works-on-httpbin"
+      },
+      "c": 5,
+      "requests": 50,
+      "timeout": "10s"
+    },
+    {
+      "name": "bearer-without-token",
+      "url": "https://httpbin.org/bearer",
+      "c": 5,
+      "requests": 50,
+      "timeout": "10s"
+    }
+  ]
+}
