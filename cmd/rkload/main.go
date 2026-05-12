@@ -17,6 +17,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
+	lgtable "github.com/charmbracelet/lipgloss/table"
+
 	"github.com/RKInnovate/rkload/internal/cache"
 	"github.com/RKInnovate/rkload/internal/config"
 	"github.com/RKInnovate/rkload/internal/importer"
@@ -421,17 +424,27 @@ func runFromConfigTUI(bundles []configBundle, jobs []endpointJob) int {
 	return 0
 }
 
-// printCompactSummary writes a one-screen-ish recap of a finished
-// TUI run: per-endpoint totals (no histograms), aggregate status +
-// latency + throughput. Designed to leave roughly the same density
-// of information in the terminal scrollback as the TUI showed in
-// its final frame, minus the ANSI styling.
+// printCompactSummary writes a one-screen recap of a finished TUI
+// run as a bordered table — same shape as the live TUI table, just
+// frozen and printed to normal stdout so it survives the alt-screen
+// dismissal. Each endpoint contributes one row (status, method,
+// name, done counter, throughput, p95). Aggregate status code
+// counts and average throughput print below the table.
+//
+// Only invoked on the TUI path (TTY-only), so ANSI styles are
+// appropriate; non-TTY runs use the verbose plain-text reporter.
 func printCompactSummary(bundles []configBundle, jobs []endpointJob,
 	summaries []report.Summary, done []bool, elapsed time.Duration) {
 
+	titleColor := lipgloss.Color("63")
+	dimColor := lipgloss.Color("241")
+	greenColor := lipgloss.Color("42")
+	redColor := lipgloss.Color("203")
+	border := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	header := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("250"))
+
 	totalRequests, totalErrors, endpointsDone := 0, 0, 0
 	allStatus := map[int]int{}
-
 	for _, job := range jobs {
 		if !done[job.idx] {
 			continue
@@ -445,49 +458,62 @@ func printCompactSummary(bundles []configBundle, jobs []endpointJob,
 		}
 	}
 
+	// Title line.
 	fmt.Println()
-	fmt.Printf("rkload — done   %s\n",
-		fmt.Sprintf("Configs: %d   Endpoints: %d   Requests: %d   Elapsed: %s",
-			len(bundles), endpointsDone, totalRequests, formatShortDuration(elapsed)))
+	titleLine := lipgloss.NewStyle().Bold(true).Foreground(titleColor).Render("rkload — done") +
+		"  " + lipgloss.NewStyle().Foreground(dimColor).Render(fmt.Sprintf(
+		"Configs: %d   Endpoints: %d   Requests: %d   Elapsed: %s",
+		len(bundles), endpointsDone, totalRequests, formatShortDuration(elapsed)))
+	fmt.Println(titleLine)
 	if endpointsDone < len(jobs) {
-		fmt.Printf("                Skipped: %d (user quit)\n", len(jobs)-endpointsDone)
+		fmt.Println(lipgloss.NewStyle().Foreground(dimColor).Render(
+			fmt.Sprintf("                Skipped: %d (user quit)", len(jobs)-endpointsDone)))
 	}
 	fmt.Println()
 
-	// Per-endpoint one-liner.
-	maxLabel := 0
-	for _, job := range jobs {
-		label := fmt.Sprintf("%s %s", job.method, endpointLabel(job.ep))
-		if len(label) > maxLabel {
-			maxLabel = len(label)
-		}
-	}
-	if maxLabel > 50 {
-		maxLabel = 50
-	}
+	// Per-endpoint table.
+	t := lgtable.New().
+		Border(lipgloss.RoundedBorder()).
+		BorderStyle(border).
+		Headers("STATUS", "METHOD", "ENDPOINT", "DONE", "R/S", "P95").
+		StyleFunc(func(row, col int) lipgloss.Style {
+			if row == lgtable.HeaderRow {
+				return header.Padding(0, 1).Align(lipgloss.Left)
+			}
+			base := lipgloss.NewStyle().Padding(0, 1)
+			if col >= 3 {
+				base = base.Align(lipgloss.Right)
+			}
+			if row < 0 {
+				return base
+			}
+			// Map back to the (filtered) jobs list to colour by status.
+			// We rebuild a filtered slice below; row indexes that.
+			return base.Foreground(rowColorFromIndex(row, jobs, summaries, done, greenColor, redColor, dimColor))
+		})
+
 	for _, job := range jobs {
 		if !done[job.idx] {
 			continue
 		}
 		s := summaries[job.idx]
-		label := fmt.Sprintf("%s %s", job.method, endpointLabel(job.ep))
-		if len(label) > maxLabel {
-			label = label[:maxLabel-1] + "…"
-		}
-		status := "✓"
+		status := "✓ done"
 		if s.Errors > 0 {
-			status = "✗"
+			status = "✗ fail"
 		}
-		fmt.Printf("  %s %-*s  %4d/%-4d  %6.1f r/s  p95 %s\n",
-			status, maxLabel, label,
-			s.Successful, s.Total,
-			s.Throughput,
+		t.Row(
+			status,
+			job.method,
+			truncate(endpointLabel(job.ep), 40),
+			fmt.Sprintf("%d/%d", s.Successful, s.Total),
+			fmt.Sprintf("%.1f r/s", s.Throughput),
 			formatShortDuration(s.P95Latency),
 		)
 	}
+	fmt.Println(t.Render())
 	fmt.Println()
 
-	// Aggregate.
+	// Aggregate footer.
 	if len(allStatus) > 0 {
 		var codes []int
 		for c := range allStatus {
@@ -496,16 +522,66 @@ func printCompactSummary(bundles []configBundle, jobs []endpointJob,
 		sort.Ints(codes)
 		var parts []string
 		for _, c := range codes {
-			parts = append(parts, fmt.Sprintf("%d:%d", c, allStatus[c]))
+			parts = append(parts, classColorAnsi(c).Render(fmt.Sprintf("%d:%d", c, allStatus[c])))
 		}
-		fmt.Printf("Status:  %s\n", strings.Join(parts, "  "))
+		fmt.Println(header.Render("Status   ") + strings.Join(parts, "  "))
 	}
 	if totalErrors > 0 {
-		fmt.Printf("Errors:  %d\n", totalErrors)
+		fmt.Println(lipgloss.NewStyle().Foreground(redColor).Render(
+			fmt.Sprintf("Errors   %d", totalErrors)))
 	}
 	if elapsed > 0 && totalRequests > 0 {
-		fmt.Printf("Avg throughput: %.1f r/s\n", float64(totalRequests)/elapsed.Seconds())
+		fmt.Println(header.Render("R/S      ") +
+			fmt.Sprintf("%.1f total", float64(totalRequests)/elapsed.Seconds()))
 	}
+}
+
+// rowColorFromIndex maps a row index in the rendered (filtered)
+// table back to a status colour. Used by the lipgloss StyleFunc
+// which only gets (row, col) — not the underlying job.
+func rowColorFromIndex(row int, jobs []endpointJob, summaries []report.Summary,
+	done []bool, greenColor, redColor, dimColor lipgloss.Color) lipgloss.Color {
+	i := 0
+	for _, job := range jobs {
+		if !done[job.idx] {
+			continue
+		}
+		if i == row {
+			if summaries[job.idx].Errors > 0 {
+				return redColor
+			}
+			return greenColor
+		}
+		i++
+	}
+	return dimColor
+}
+
+// classColorAnsi mirrors the TUI's classColor for the post-run
+// status histogram. Duplicated here so cmd/ doesn't have to import
+// internal/tui purely for its colour helper.
+func classColorAnsi(code int) lipgloss.Style {
+	switch {
+	case code >= 200 && code < 300:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	case code >= 300 && code < 400:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
+	case code >= 400 && code < 500:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+	case code >= 500:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
+	default:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	}
+}
+
+// truncate clamps s to at most n display-width cells, appending an
+// ellipsis if it had to chop. Mirrors the helper in internal/tui.
+func truncate(s string, n int) string {
+	if lipgloss.Width(s) <= n {
+		return s
+	}
+	return s[:n-1] + "…"
 }
 
 func endpointLabel(ep config.Endpoint) string {

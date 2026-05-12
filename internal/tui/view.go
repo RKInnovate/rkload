@@ -7,20 +7,20 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/lipgloss/table"
 )
 
 // Style palette. Kept terse on purpose — readable terminals win
 // over flashy ones. Foreground colours only; backgrounds rarely
 // look good on every terminal theme.
 var (
-	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("63"))  // purple
-	headerStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("250")) // light grey
-	dimStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))            // mid grey
-	successStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))             // green
-	warningStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))            // orange/yellow
-	errorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))            // red
-	currentStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("219")) // pink — running
-	selectedStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("33"))  // blue — selected
+	titleStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("63"))  // purple
+	headerStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("250")) // light grey
+	dimStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))            // mid grey
+	successStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))             // green
+	warningStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))            // orange/yellow
+	errorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))            // red
+	borderStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))            // dim grey for table borders
 )
 
 // View renders one frame. Pure function of Model state — same
@@ -38,11 +38,11 @@ func (m Model) View() string {
 func (m Model) renderOverview() string {
 	var b strings.Builder
 	b.WriteString(m.renderHeader())
-	b.WriteString("\n")
-	b.WriteString(m.renderEndpointList())
-	b.WriteString("\n")
+	b.WriteString("\n\n")
+	b.WriteString(m.renderEndpointTable())
+	b.WriteString("\n\n")
 	b.WriteString(m.renderAggregate())
-	b.WriteString("\n")
+	b.WriteString("\n\n")
 	b.WriteString(m.renderFooter())
 	return b.String()
 }
@@ -67,54 +67,89 @@ func (m Model) renderHeader() string {
 	return title + "  " + dimStyle.Render(body)
 }
 
-// renderEndpointList shows every endpoint, one per row, with
-// progress bar and per-endpoint counters. Selected endpoint gets
-// blue highlight; running endpoint gets pink.
-func (m Model) renderEndpointList() string {
-	var lines []string
-	maxName := 0
-	for _, ep := range m.endpoints {
-		label := fmt.Sprintf("%s %s", ep.Method, ep.Name)
-		if l := lipgloss.Width(label); l > maxName {
-			maxName = l
-		}
-	}
-	if maxName > 40 {
-		maxName = 40
-	}
+// renderEndpointTable renders the per-endpoint progress as a
+// bordered lipgloss table — proper headers, aligned cells, status
+// column derived from per-endpoint state. Selected row gets a
+// blue highlight; row colour also reflects status (dim for
+// waiting, pink for running, green for done, red for errored).
+func (m Model) renderEndpointTable() string {
+	t := table.New().
+		Border(lipgloss.RoundedBorder()).
+		BorderStyle(borderStyle).
+		Headers("STATUS", "METHOD", "ENDPOINT", "PROGRESS", "DONE", "R/S", "P95").
+		StyleFunc(func(row, col int) lipgloss.Style {
+			if row == table.HeaderRow {
+				return headerStyle.Padding(0, 1).Align(lipgloss.Left)
+			}
+			// Body cell — figure out per-endpoint state colour, then
+			// override with the selection highlight when applicable.
+			base := lipgloss.NewStyle().Padding(0, 1)
+			// Right-align the numeric columns for readability.
+			if col >= 4 {
+				base = base.Align(lipgloss.Right)
+			}
+			if row < 0 || row >= len(m.states) {
+				return base
+			}
+			s := &m.states[row]
+			styled := base.Foreground(statusColor(s))
+			if row == m.selectedIdx && !m.drillMode {
+				styled = styled.Bold(true).Foreground(lipgloss.Color("33"))
+			}
+			return styled
+		})
 
+	now := time.Now()
 	for i, ep := range m.endpoints {
 		s := &m.states[i]
-		label := fmt.Sprintf("%s %s", ep.Method, ep.Name)
-		if w := lipgloss.Width(label); w > maxName {
-			label = label[:maxName-1] + "…"
-		}
-		label = padRight(label, maxName)
-
-		bar := renderProgressBar(s.completed, ep.Total, 22)
-		counter := fmt.Sprintf("%d/%d", s.completed, ep.Total)
-		throughput := s.throughput(time.Now())
-		p95 := percentile(append([]time.Duration(nil), s.latencies...), 95)
-
-		stats := fmt.Sprintf("%s  %6.1f r/s  p95 %s",
-			padLeft(counter, 9),
-			throughput,
-			padLeft(formatDuration(p95), 7),
+		t.Row(
+			statusLabel(s),
+			ep.Method,
+			truncate(ep.Name, 30),
+			renderProgressBar(s.completed, ep.Total, 20),
+			fmt.Sprintf("%d/%d", s.completed, ep.Total),
+			fmt.Sprintf("%.1f r/s", s.throughput(now)),
+			formatDuration(percentile(append([]time.Duration(nil), s.latencies...), 95)),
 		)
-
-		line := fmt.Sprintf("  %s  %s  %s", label, bar, stats)
-
-		switch {
-		case i == m.currentIdx && !s.finished:
-			line = currentStyle.Render(line)
-		case i == m.selectedIdx:
-			line = selectedStyle.Render(line)
-		case s.finished:
-			line = successStyle.Render("✓") + line[1:]
-		}
-		lines = append(lines, line)
 	}
-	return strings.Join(lines, "\n")
+	return t.Render()
+}
+
+// statusColor maps an endpoint's current state to its row colour.
+func statusColor(s *endpointState) lipgloss.Color {
+	switch {
+	case s.finished && s.errCount > 0:
+		return lipgloss.Color("203") // red
+	case s.finished:
+		return lipgloss.Color("42") // green
+	case !s.startedAt.IsZero():
+		return lipgloss.Color("219") // pink — running
+	default:
+		return lipgloss.Color("241") // dim — waiting
+	}
+}
+
+// statusLabel returns the leftmost-column text describing where
+// an endpoint is in its lifecycle. Width is held constant across
+// all four states so the column stays visually tight.
+func statusLabel(s *endpointState) string {
+	switch {
+	case s.finished && s.errCount > 0:
+		return "✗ fail"
+	case s.finished:
+		return "✓ done"
+	case !s.startedAt.IsZero():
+		return "▶ run"
+	default:
+		return "⏳ wait"
+	}
+}
+
+func truncate(s string, n int) string {
+	if lipgloss.Width(s) <= n {
+		return s
+	}
+	return s[:n-1] + "…"
 }
 
 // renderAggregate prints the live status histogram, percentile
@@ -312,20 +347,4 @@ func (m Model) runElapsed() time.Duration {
 		return m.endedAt.Sub(m.startedAt)
 	}
 	return time.Since(m.startedAt)
-}
-
-func padRight(s string, n int) string {
-	w := lipgloss.Width(s)
-	if w >= n {
-		return s
-	}
-	return s + strings.Repeat(" ", n-w)
-}
-
-func padLeft(s string, n int) string {
-	w := lipgloss.Width(s)
-	if w >= n {
-		return s
-	}
-	return strings.Repeat(" ", n-w) + s
 }
