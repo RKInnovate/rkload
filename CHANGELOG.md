@@ -7,7 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Nothing yet — open the next section once changes land._
+### Added
+- Live TUI dashboard (TTY-only) replaces plain-text per-endpoint
+  progress output while a `-config` run is in flight. Renders
+  per-endpoint progress bars with counter + throughput + live
+  p95, aggregate status code distribution coloured by class
+  (2xx green, 3xx blue, 4xx yellow, 5xx red), rolling
+  p50/p95/p99 latency ticker, and a throughput sparkline over
+  the recent past. Keybindings: q to quit, ↑↓ to select an
+  endpoint, ↵/→ to drill into the per-endpoint detail panel,
+  esc/← to back out
+- The TUI is purely additive — non-TTY stdout (CI, pipes,
+  redirects) gets the existing plain-text path unchanged.
+  After the TUI exits, the plain-text aggregate report still
+  prints to stdout, so `rkload -config ... | tee log.txt`
+  captures the same readable summary it did before
+- `loader.Options.OnResult` callback that fires per-Result
+  as Run produces them, used by the TUI to render live
+  state. Optional — nil is safe and preserves the prior
+  synchronous-return behaviour
+- `-config` now accepts a directory in addition to a single
+  file. Directory mode scans for `*.rkload.json` (non-
+  recursive, lexical order) and runs every file as one
+  combined session — single TUI, single aggregate report.
+  The compound `.rkload.json` suffix is intentional: directory
+  scans ignore plain `*.json` files so unrelated JSON in the
+  same directory doesn't trip the schema validator. Single-
+  file mode still accepts any extension
+
+### Dependencies
+- Added `github.com/charmbracelet/bubbletea` and
+  `github.com/charmbracelet/lipgloss` for the TUI. These are
+  the first production-side non-stdlib deps beyond `yaml.v3`.
+  Worth the cost — hand-rolling a serious TUI on raw ANSI
+  escapes is brittle and time-consuming. `go.mod` minimum
+  bumped from 1.22 to 1.24 (the lowest the charm libraries
+  support)
 
 ## [1.0.0] - 2026-05-11
 

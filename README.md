@@ -142,10 +142,38 @@ For testing more than one endpoint in a single run, use a JSON config file. The 
 ```
 
 ```bash
-rkload -config rkload.config.json
+rkload -config rkload.config.json                 # single file (any extension)
+rkload -config ./configs/                         # directory of *.rkload.json
 ```
 
 Endpoints run **sequentially per group** so each gets its own clean per-endpoint report (latency, error breakdown, distribution histogram), followed by an `=== Overall ===` aggregate. The exit code is non-zero if any endpoint had any failed request — same CI semantic as the single-URL mode.
+
+**Directory mode** — pointing `-config` at a directory loads every `*.rkload.json` file in lexical order (non-recursive) and runs them as one combined session. The compound `.rkload.json` suffix is intentional: it lets you keep unrelated JSON in the same directory (data fixtures, app settings) without rkload trying to validate them. Single-file mode still accepts any extension.
+
+**Live dashboard (TTY only)** — when stdout is a terminal, rkload renders a live dashboard during the run instead of streaming text:
+
+```text
+rkload — live  Endpoints: 3   Requests: 127/300 (42%)   Elapsed: 12.4s
+
+  GET httpbin-get        █████████░░░░░░░░░░░    47/100    18.3 r/s   p95 425ms
+  GET 1s-delay           ████░░░░░░░░░░░░░░░░    25/100     7.1 r/s   p95 1.1s
+  GET 2s-delay           (waiting)
+
+Status codes   200:97   429:30
+Latency        p50 312ms   p95 1.05s   p99 1.2s
+Throughput     ▁▂▃▄▅▆▇█▇▆▅▄▃▂▁                       22.4 r/s
+
+[↑↓] select   [↵/→] drill in   [q] quit
+```
+
+Keybindings:
+
+- **q** / **ctrl+c** — quit (in-flight requests finish, subsequent endpoints skipped)
+- **↑** / **↓** (or **k** / **j**) — select an endpoint row
+- **enter** / **→** (or **l**) — drill into the selected endpoint's per-status breakdown
+- **esc** / **←** (or **h**) — back to overview
+
+After the TUI exits, the plain-text aggregate report still prints to stdout, so `rkload -config ... | tee log.txt` captures readable summary text the same as it did before. The TUI is purely additive — non-TTY environments (CI, pipes, redirects) get the existing plain-text path unchanged.
 
 See [`docs/examples/basic.config.json`](./docs/examples/basic.config.json) for a fuller example and [`schemas/README.md`](./schemas/README.md) for the schema versioning policy (each `vN/` is immutable once published — never modify a published schema in place).
 

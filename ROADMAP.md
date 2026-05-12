@@ -10,6 +10,19 @@ Items here are aspirational, not commitments. Priorities shift based on real usa
 
 Everything below shipped as the inaugural published release. Earlier version numbers (v0.1.0 – v0.3.4) existed as development markers in the local git history but were never built into GitHub Releases.
 
+### Live TUI dashboard
+- [x] Auto-on when stdout is a TTY, plain-text path preserved everywhere else
+- [x] Per-endpoint progress bar with counter, throughput, live p95
+- [x] Aggregate status code distribution coloured by class
+- [x] Rolling p50/p95/p99 latency ticker
+- [x] Throughput sparkline over the recent past
+- [x] Keybindings: q to quit, ↑↓ to select, ↵/→ to drill in, esc/← to back out
+- [x] Plain-text aggregate report still prints after TUI exits so `| tee log.txt` keeps working
+
+### Multi-config loading
+- [x] `-config <dir>` scans for `*.rkload.json` (compound suffix avoids loading unrelated JSON), lexical order, non-recursive
+- [x] All configs run as one combined session under a single TUI and single aggregate report
+
 ### Engine
 - [x] Goroutine-based concurrent HTTP load generation with a bounded worker pool
 - [x] CLI flags: `-url`, `-c`, `-n`, `-method`, `-version`, `-config`, `-help`
