@@ -14,11 +14,14 @@ import (
 	"strings"
 	"time"
 
+	"sync/atomic"
+
 	"github.com/RKInnovate/rkload/internal/cache"
 	"github.com/RKInnovate/rkload/internal/config"
 	"github.com/RKInnovate/rkload/internal/importer"
 	"github.com/RKInnovate/rkload/internal/loader"
 	"github.com/RKInnovate/rkload/internal/report"
+	"github.com/RKInnovate/rkload/internal/tui"
 	"github.com/RKInnovate/rkload/internal/updater"
 )
 
@@ -135,10 +138,24 @@ func runSingle(opts loader.Options) int {
 	return 0
 }
 
+// endpointJob is the work item the runner goroutine consumes: the
+// resolved method + endpoint plus the flat index that matches the
+// TUI's endpoint slice.
+type endpointJob struct {
+	method string
+	ep     config.Endpoint
+	idx    int
+}
+
 // runFromConfig loads a JSON config and runs every (method, endpoint)
-// pair sequentially so per-endpoint reports stay clean. Returns
-// non-zero if any endpoint had any failed requests, or if the config
-// itself is invalid — load-bearing for CI usage.
+// pair sequentially. Returns non-zero if any endpoint had any failed
+// requests, or if the config itself is invalid — load-bearing for
+// CI usage.
+//
+// When stdout is a TTY, a live TUI dashboard replaces the per-
+// endpoint progress output during the run; the plain-text aggregate
+// report still prints afterwards so `rkload ... | tee log.txt` and
+// similar workflows capture meaningful, grep-able text.
 func runFromConfig(path string) int {
 	cfg, status, err := loadAndValidateForRun(path)
 	if err != nil {
@@ -146,48 +163,58 @@ func runFromConfig(path string) int {
 		return 1
 	}
 
+	jobs := flattenJobs(cfg)
+
+	if isTerminal(os.Stdout) {
+		return runFromConfigTUI(path, status, cfg, jobs)
+	}
+	return runFromConfigPlain(path, status, cfg, jobs)
+}
+
+// flattenJobs walks the config's method groups in their stable order
+// and produces a flat slice of (method, endpoint, index) tuples. The
+// index matches the TUI's endpoint slice so result messages route
+// to the right row.
+func flattenJobs(cfg *config.Config) []endpointJob {
+	var jobs []endpointJob
+	idx := 0
+	for _, group := range cfg.Groups() {
+		for _, ep := range group.Endpoints {
+			jobs = append(jobs, endpointJob{method: group.Method, ep: ep, idx: idx})
+			idx++
+		}
+	}
+	return jobs
+}
+
+// runFromConfigPlain is the legacy text path: per-endpoint progress
+// printed inline, then the overall aggregate. Used when stdout is
+// not a TTY.
+func runFromConfigPlain(path, status string, cfg *config.Config, jobs []endpointJob) int {
 	fmt.Printf("Loaded config: %s (schema v%d)\n", path, cfg.Version)
 	fmt.Printf("Validation:    %s\n\n", status)
 
-	var totalRequests, totalErrors, endpointCount int
-	for _, group := range cfg.Groups() {
-		for _, ep := range group.Endpoints {
-			label := ep.Name
-			if label == "" {
-				label = ep.URL
-			}
-			fmt.Printf("=== %s %s ===\n", group.Method, label)
-			fmt.Printf("URL:     %s\n", ep.URL)
-			fmt.Printf("Workers: %d | Requests: %d | Timeout: %s\n\n",
-				ep.Concurrency, ep.Requests, ep.Timeout)
-
-			timeout, _ := ep.ParsedTimeout() // Validate already proved this parses
-			opts := loader.Options{
-				URL:         ep.URL,
-				Method:      group.Method,
-				Concurrency: ep.Concurrency,
-				Requests:    ep.Requests,
-				Timeout:     timeout,
-				Headers:     ep.Headers,
-				Body:        ep.Body,
-			}
-
-			start := time.Now()
-			results := loader.Run(opts)
-			elapsed := time.Since(start)
-
-			summary := report.Summarize(results, elapsed)
-			report.Print(os.Stdout, summary)
-			fmt.Println()
-
-			totalRequests += summary.Total
-			totalErrors += summary.Errors
-			endpointCount++
+	var totalRequests, totalErrors int
+	for _, job := range jobs {
+		label := job.ep.Name
+		if label == "" {
+			label = job.ep.URL
 		}
+		fmt.Printf("=== %s %s ===\n", job.method, label)
+		fmt.Printf("URL:     %s\n", job.ep.URL)
+		fmt.Printf("Workers: %d | Requests: %d | Timeout: %s\n\n",
+			job.ep.Concurrency, job.ep.Requests, job.ep.Timeout)
+
+		summary := runOneEndpoint(job, nil)
+		report.Print(os.Stdout, summary)
+		fmt.Println()
+
+		totalRequests += summary.Total
+		totalErrors += summary.Errors
 	}
 
 	fmt.Printf("=== Overall ===\n")
-	fmt.Printf("Endpoints tested: %d\n", endpointCount)
+	fmt.Printf("Endpoints tested: %d\n", len(jobs))
 	fmt.Printf("Total requests:   %d\n", totalRequests)
 	fmt.Printf("Total errors:     %d\n", totalErrors)
 
@@ -195,6 +222,127 @@ func runFromConfig(path string) int {
 		return 1
 	}
 	return 0
+}
+
+// runFromConfigTUI runs the load test under the live dashboard.
+// A worker goroutine iterates jobs sequentially, feeding the TUI
+// EndpointStart/EndpointEnd messages and routing per-result events
+// through OnResult. After the TUI exits (Done message OR user
+// pressed q), the plain-text aggregate report prints to stdout
+// from the surviving summaries.
+//
+// If the user quits early, in-flight requests on the current
+// endpoint still complete (loader.Run is blocking) and subsequent
+// endpoints are skipped. The exit code is 0 on a clean user quit
+// even if errors accumulated — the user told us to stop.
+func runFromConfigTUI(path, status string, cfg *config.Config, jobs []endpointJob) int {
+	endpoints := make([]tui.Endpoint, 0, len(jobs))
+	for _, job := range jobs {
+		endpoints = append(endpoints, tui.EndpointFromConfig(job.method, job.ep))
+	}
+
+	program := tui.NewProgram(endpoints, os.Stdout)
+
+	var (
+		summaries     = make([]report.Summary, len(jobs))
+		summariesDone = make([]bool, len(jobs))
+		quitRequested atomic.Bool
+		workerDone    = make(chan struct{})
+	)
+
+	go func() {
+		defer close(workerDone)
+		for _, job := range jobs {
+			if quitRequested.Load() {
+				break
+			}
+			program.Send(tui.EndpointStart{Index: job.idx})
+			summary := runOneEndpoint(job, func(r loader.Result) {
+				program.Send(tui.Result(job.idx, r))
+			})
+			summaries[job.idx] = summary
+			summariesDone[job.idx] = true
+			program.Send(tui.EndpointEnd{Index: job.idx})
+		}
+		program.Send(tui.Done{})
+	}()
+
+	userQuit, runErr := program.Run()
+	if userQuit {
+		quitRequested.Store(true)
+	}
+	<-workerDone
+
+	if runErr != nil {
+		fmt.Fprintln(os.Stderr, "TUI error:", runErr)
+		return 1
+	}
+
+	// Plain-text final report — same content as the no-TTY path,
+	// so logs / pipes still get the readable summary.
+	fmt.Printf("Loaded config: %s (schema v%d)\n", path, cfg.Version)
+	fmt.Printf("Validation:    %s\n\n", status)
+
+	var totalRequests, totalErrors, endpointsDone int
+	for _, job := range jobs {
+		if !summariesDone[job.idx] {
+			continue
+		}
+		summary := summaries[job.idx]
+		label := job.ep.Name
+		if label == "" {
+			label = job.ep.URL
+		}
+		fmt.Printf("=== %s %s ===\n", job.method, label)
+		fmt.Printf("URL:     %s\n", job.ep.URL)
+		fmt.Printf("Workers: %d | Requests: %d | Timeout: %s\n\n",
+			job.ep.Concurrency, job.ep.Requests, job.ep.Timeout)
+		report.Print(os.Stdout, summary)
+		fmt.Println()
+
+		totalRequests += summary.Total
+		totalErrors += summary.Errors
+		endpointsDone++
+	}
+
+	fmt.Printf("=== Overall ===\n")
+	fmt.Printf("Endpoints tested: %d\n", endpointsDone)
+	if endpointsDone < len(jobs) {
+		fmt.Printf("Endpoints skipped: %d (user quit)\n", len(jobs)-endpointsDone)
+	}
+	fmt.Printf("Total requests:   %d\n", totalRequests)
+	fmt.Printf("Total errors:     %d\n", totalErrors)
+
+	if userQuit {
+		return 0
+	}
+	if totalErrors > 0 {
+		return 1
+	}
+	return 0
+}
+
+// runOneEndpoint runs a single endpoint to completion and returns
+// its report.Summary. onResult, when non-nil, is forwarded to the
+// loader as Options.OnResult so live progress UIs can subscribe.
+// Shared by both the plain and TUI paths so the per-endpoint
+// behaviour stays identical.
+func runOneEndpoint(job endpointJob, onResult func(loader.Result)) report.Summary {
+	timeout, _ := job.ep.ParsedTimeout() // Validate already proved this parses
+	opts := loader.Options{
+		URL:         job.ep.URL,
+		Method:      job.method,
+		Concurrency: job.ep.Concurrency,
+		Requests:    job.ep.Requests,
+		Timeout:     timeout,
+		Headers:     job.ep.Headers,
+		Body:        job.ep.Body,
+		OnResult:    onResult,
+	}
+	start := time.Now()
+	results := loader.Run(opts)
+	elapsed := time.Since(start)
+	return report.Summarize(results, elapsed)
 }
 
 // importMain dispatches to per-format handlers under `rkload import`.
