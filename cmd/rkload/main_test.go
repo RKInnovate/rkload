@@ -567,6 +567,175 @@ func TestRunUpdate_NetworkError(t *testing.T) {
 	}
 }
 
+// ---- resolveConfigs + directory mode -----------------------------------
+//
+// -config now accepts either a file path or a directory. A directory
+// is scanned for *.rkload.json (compound suffix is intentional —
+// plain *.json would trip on unrelated JSON files in the same
+// directory). These tests pin both modes plus the helpful errors
+// for misuse.
+
+func writeTempConfigAt(t *testing.T, dir, name, content string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+	return path
+}
+
+func TestResolveConfigs_SingleFile(t *testing.T) {
+	t.Setenv(cache.EnvDirOverride, t.TempDir())
+	dir := t.TempDir()
+	path := writeTempConfigAt(t, dir, "rkload.json", validConfigJSON)
+
+	bundles, err := resolveConfigs(path)
+	if err != nil {
+		t.Fatalf("resolveConfigs: %v", err)
+	}
+	if len(bundles) != 1 {
+		t.Errorf("got %d bundles, want 1", len(bundles))
+	}
+	if bundles[0].path != path {
+		t.Errorf("bundle path = %q, want %q", bundles[0].path, path)
+	}
+}
+
+func TestResolveConfigs_SingleFileAnyExtension(t *testing.T) {
+	// Single-file mode accepts any path. Only directory mode
+	// filters by *.rkload.json.
+	t.Setenv(cache.EnvDirOverride, t.TempDir())
+	dir := t.TempDir()
+	path := writeTempConfigAt(t, dir, "custom-name.config", validConfigJSON)
+
+	bundles, err := resolveConfigs(path)
+	if err != nil || len(bundles) != 1 {
+		t.Fatalf("single-file mode should accept any extension; err=%v len=%d", err, len(bundles))
+	}
+}
+
+func TestResolveConfigs_DirectoryLoadsRkloadJSONOnly(t *testing.T) {
+	t.Setenv(cache.EnvDirOverride, t.TempDir())
+	dir := t.TempDir()
+	writeTempConfigAt(t, dir, "a.rkload.json", validConfigJSON)
+	writeTempConfigAt(t, dir, "b.rkload.json", validConfigJSON)
+	// Plain .json should be IGNORED in directory mode — could be
+	// some unrelated config / data file.
+	writeTempConfigAt(t, dir, "unrelated.json", `{"this": "is not rkload"}`)
+
+	bundles, err := resolveConfigs(dir)
+	if err != nil {
+		t.Fatalf("resolveConfigs: %v", err)
+	}
+	if len(bundles) != 2 {
+		t.Fatalf("got %d bundles, want 2 (.rkload.json files only)", len(bundles))
+	}
+}
+
+func TestResolveConfigs_DirectoryLexicalOrder(t *testing.T) {
+	t.Setenv(cache.EnvDirOverride, t.TempDir())
+	dir := t.TempDir()
+	// Create files in non-alphabetical order to verify sort.
+	writeTempConfigAt(t, dir, "c.rkload.json", validConfigJSON)
+	writeTempConfigAt(t, dir, "a.rkload.json", validConfigJSON)
+	writeTempConfigAt(t, dir, "b.rkload.json", validConfigJSON)
+
+	bundles, err := resolveConfigs(dir)
+	if err != nil {
+		t.Fatalf("resolveConfigs: %v", err)
+	}
+	if len(bundles) != 3 {
+		t.Fatalf("got %d bundles", len(bundles))
+	}
+	wantOrder := []string{"a.rkload.json", "b.rkload.json", "c.rkload.json"}
+	for i, b := range bundles {
+		if filepath.Base(b.path) != wantOrder[i] {
+			t.Errorf("bundle[%d] = %q, want %q", i, filepath.Base(b.path), wantOrder[i])
+		}
+	}
+}
+
+func TestResolveConfigs_DirectoryWithNoRkloadFiles(t *testing.T) {
+	t.Setenv(cache.EnvDirOverride, t.TempDir())
+	dir := t.TempDir()
+	writeTempConfigAt(t, dir, "unrelated.json", `{"key": "value"}`)
+	writeTempConfigAt(t, dir, "README.md", "hello")
+
+	_, err := resolveConfigs(dir)
+	if err == nil {
+		t.Fatal("expected error for directory with no *.rkload.json")
+	}
+	if !strings.Contains(err.Error(), "no *.rkload.json files found") {
+		t.Errorf("error should mention missing files, got: %v", err)
+	}
+}
+
+func TestResolveConfigs_DirectorySkipsSubdirs(t *testing.T) {
+	t.Setenv(cache.EnvDirOverride, t.TempDir())
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTempConfigAt(t, filepath.Join(dir, "sub"), "nested.rkload.json", validConfigJSON)
+	writeTempConfigAt(t, dir, "top.rkload.json", validConfigJSON)
+
+	bundles, err := resolveConfigs(dir)
+	if err != nil {
+		t.Fatalf("resolveConfigs: %v", err)
+	}
+	if len(bundles) != 1 {
+		t.Errorf("non-recursive scan should ignore subdirs; got %d bundles", len(bundles))
+	}
+	if filepath.Base(bundles[0].path) != "top.rkload.json" {
+		t.Errorf("found wrong file: %q", filepath.Base(bundles[0].path))
+	}
+}
+
+func TestResolveConfigs_NonexistentPath(t *testing.T) {
+	_, err := resolveConfigs("/no/such/path/at/all")
+	if err == nil {
+		t.Fatal("expected error for nonexistent path")
+	}
+}
+
+func TestFlattenJobs_PreservesOriginAndOrder(t *testing.T) {
+	t.Setenv(cache.EnvDirOverride, t.TempDir())
+	dir := t.TempDir()
+	// Two configs: first has 1 GET, second has 1 POST + 1 PUT.
+	a := writeTempConfigAt(t, dir, "a.rkload.json", `{
+		"version": 1,
+		"GET": [{"url": "https://example.com/a"}]
+	}`)
+	b := writeTempConfigAt(t, dir, "b.rkload.json", `{
+		"version": 1,
+		"POST": [{"url": "https://example.com/p"}],
+		"PUT":  [{"url": "https://example.com/u"}]
+	}`)
+
+	bundles, err := resolveConfigs(dir)
+	if err != nil {
+		t.Fatalf("resolveConfigs: %v", err)
+	}
+	jobs := flattenJobs(bundles)
+	if len(jobs) != 3 {
+		t.Fatalf("got %d jobs, want 3", len(jobs))
+	}
+	// Order: a.GET, b.POST, b.PUT  (file-lexical, then method-stable)
+	wantOrigins := []string{a, b, b}
+	wantMethods := []string{"GET", "POST", "PUT"}
+	for i, j := range jobs {
+		if j.origin != wantOrigins[i] {
+			t.Errorf("jobs[%d].origin = %q, want %q", i, j.origin, wantOrigins[i])
+		}
+		if j.method != wantMethods[i] {
+			t.Errorf("jobs[%d].method = %q, want %q", i, j.method, wantMethods[i])
+		}
+		if j.idx != i {
+			t.Errorf("jobs[%d].idx = %d, want %d (indices must be flat 0..n-1)", i, j.idx, i)
+		}
+	}
+}
+
 // ---- runInit -------------------------------------------------------------
 //
 // runInit emits a starter config; the tests below pin the three

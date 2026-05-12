@@ -11,10 +11,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
-	"time"
-
 	"sync/atomic"
+	"time"
 
 	"github.com/RKInnovate/rkload/internal/cache"
 	"github.com/RKInnovate/rkload/internal/config"
@@ -138,61 +138,165 @@ func runSingle(opts loader.Options) int {
 	return 0
 }
 
+// ConfigSuffix is the filename suffix rkload looks for when -config
+// points at a directory. Picking a compound suffix instead of plain
+// .json prevents directory-mode runs from accidentally trying to
+// load unrelated JSON files (settings, data fixtures, etc.) that
+// happen to share the directory.
+const ConfigSuffix = ".rkload.json"
+
+// configBundle pairs a parsed Config with the file it came from and
+// the validation cache status string we want to show in the final
+// report. The TUI / plain renderers consume []configBundle so both
+// single-file and directory modes share the same downstream code.
+type configBundle struct {
+	cfg    *config.Config
+	path   string
+	status string
+}
+
 // endpointJob is the work item the runner goroutine consumes: the
 // resolved method + endpoint plus the flat index that matches the
-// TUI's endpoint slice.
+// TUI's endpoint slice. Origin records which config the endpoint
+// came from so the final report can group endpoints by source file
+// when a directory bundles several configs.
 type endpointJob struct {
 	method string
 	ep     config.Endpoint
 	idx    int
+	origin string // path of the config file this endpoint came from
 }
 
-// runFromConfig loads a JSON config and runs every (method, endpoint)
-// pair sequentially. Returns non-zero if any endpoint had any failed
-// requests, or if the config itself is invalid — load-bearing for
-// CI usage.
+// runFromConfig loads a JSON config (single file) or every
+// *.rkload.json in a directory (recursive iteration is intentionally
+// NOT done — keep this predictable), and runs every (method,
+// endpoint) pair sequentially. Returns non-zero if any endpoint
+// had any failed requests, or if any config was invalid —
+// load-bearing for CI usage.
 //
 // When stdout is a TTY, a live TUI dashboard replaces the per-
 // endpoint progress output during the run; the plain-text aggregate
 // report still prints afterwards so `rkload ... | tee log.txt` and
 // similar workflows capture meaningful, grep-able text.
 func runFromConfig(path string) int {
-	cfg, status, err := loadAndValidateForRun(path)
+	bundles, err := resolveConfigs(path)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-
-	jobs := flattenJobs(cfg)
+	jobs := flattenJobs(bundles)
+	if len(jobs) == 0 {
+		fmt.Fprintln(os.Stderr, "config: no endpoints in the loaded config(s)")
+		return 1
+	}
 
 	if isTerminal(os.Stdout) {
-		return runFromConfigTUI(path, status, cfg, jobs)
+		return runFromConfigTUI(bundles, jobs)
 	}
-	return runFromConfigPlain(path, status, cfg, jobs)
+	return runFromConfigPlain(bundles, jobs)
 }
 
-// flattenJobs walks the config's method groups in their stable order
-// and produces a flat slice of (method, endpoint, index) tuples. The
-// index matches the TUI's endpoint slice so result messages route
-// to the right row.
-func flattenJobs(cfg *config.Config) []endpointJob {
+// resolveConfigs handles both forms of the -config argument. A
+// regular file path loads that one file (any extension accepted);
+// a directory path scans for *.rkload.json entries (lexically
+// sorted, non-recursive). Each file is loaded + validated
+// independently — the validation cache fires per-file.
+func resolveConfigs(path string) ([]configBundle, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("config: %w", err)
+	}
+	if !info.IsDir() {
+		cfg, status, err := loadAndValidateForRun(path)
+		if err != nil {
+			return nil, err
+		}
+		return []configBundle{{cfg: cfg, path: path, status: status}}, nil
+	}
+
+	files, err := findRkloadConfigs(path)
+	if err != nil {
+		return nil, fmt.Errorf("config: scanning %s: %w", path, err)
+	}
+	if len(files) == 0 {
+		return nil, fmt.Errorf("config: no *.rkload.json files found in %s "+
+			"(directory-mode looks for the compound suffix to avoid loading "+
+			"unrelated JSON files)", path)
+	}
+	bundles := make([]configBundle, 0, len(files))
+	for _, f := range files {
+		cfg, status, err := loadAndValidateForRun(f)
+		if err != nil {
+			return nil, err
+		}
+		bundles = append(bundles, configBundle{cfg: cfg, path: f, status: status})
+	}
+	return bundles, nil
+}
+
+// findRkloadConfigs returns the *.rkload.json file paths in dir,
+// sorted lexically. Non-recursive — nested directories are ignored
+// so users can keep helper files / staging configs under
+// subdirectories without affecting a top-level run.
+func findRkloadConfigs(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if !strings.HasSuffix(e.Name(), ConfigSuffix) {
+			continue
+		}
+		files = append(files, filepath.Join(dir, e.Name()))
+	}
+	sort.Strings(files)
+	return files, nil
+}
+
+// flattenJobs walks every bundle's config in stable order and
+// produces a flat slice of (method, endpoint, index, origin)
+// tuples. The index matches the TUI's endpoint slice so result
+// messages route to the right row.
+func flattenJobs(bundles []configBundle) []endpointJob {
 	var jobs []endpointJob
 	idx := 0
-	for _, group := range cfg.Groups() {
-		for _, ep := range group.Endpoints {
-			jobs = append(jobs, endpointJob{method: group.Method, ep: ep, idx: idx})
-			idx++
+	for _, b := range bundles {
+		for _, group := range b.cfg.Groups() {
+			for _, ep := range group.Endpoints {
+				jobs = append(jobs, endpointJob{
+					method: group.Method,
+					ep:     ep,
+					idx:    idx,
+					origin: b.path,
+				})
+				idx++
+			}
 		}
 	}
 	return jobs
 }
 
+// printBundlesHeader prints the per-file Loaded/Validation header.
+// One line each for single-file runs, multiple lines for directory
+// runs. Used at the top of plain mode and at the bottom of TUI mode
+// (which shows the live dashboard during the run instead).
+func printBundlesHeader(bundles []configBundle) {
+	for _, b := range bundles {
+		fmt.Printf("Loaded config: %s (schema v%d)\n", b.path, b.cfg.Version)
+		fmt.Printf("Validation:    %s\n", b.status)
+	}
+	fmt.Println()
+}
+
 // runFromConfigPlain is the legacy text path: per-endpoint progress
 // printed inline, then the overall aggregate. Used when stdout is
 // not a TTY.
-func runFromConfigPlain(path, status string, cfg *config.Config, jobs []endpointJob) int {
-	fmt.Printf("Loaded config: %s (schema v%d)\n", path, cfg.Version)
-	fmt.Printf("Validation:    %s\n\n", status)
+func runFromConfigPlain(bundles []configBundle, jobs []endpointJob) int {
+	printBundlesHeader(bundles)
 
 	var totalRequests, totalErrors int
 	for _, job := range jobs {
@@ -235,7 +339,7 @@ func runFromConfigPlain(path, status string, cfg *config.Config, jobs []endpoint
 // endpoint still complete (loader.Run is blocking) and subsequent
 // endpoints are skipped. The exit code is 0 on a clean user quit
 // even if errors accumulated — the user told us to stop.
-func runFromConfigTUI(path, status string, cfg *config.Config, jobs []endpointJob) int {
+func runFromConfigTUI(bundles []configBundle, jobs []endpointJob) int {
 	endpoints := make([]tui.Endpoint, 0, len(jobs))
 	for _, job := range jobs {
 		endpoints = append(endpoints, tui.EndpointFromConfig(job.method, job.ep))
@@ -280,8 +384,7 @@ func runFromConfigTUI(path, status string, cfg *config.Config, jobs []endpointJo
 
 	// Plain-text final report — same content as the no-TTY path,
 	// so logs / pipes still get the readable summary.
-	fmt.Printf("Loaded config: %s (schema v%d)\n", path, cfg.Version)
-	fmt.Printf("Validation:    %s\n\n", status)
+	printBundlesHeader(bundles)
 
 	var totalRequests, totalErrors, endpointsDone int
 	for _, job := range jobs {
