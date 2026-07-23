@@ -9,10 +9,15 @@ Each schema version lives at its own immutable path:
 
 ```
 schemas/
-  v1/config.schema.json   # schema version 1 (current)
-  v2/config.schema.json   # added when a breaking change is needed
+  v1/config.schema.json   # schema version 1
+  v2/config.schema.json   # schema version 2 (current)
   ...
 ```
+
+A new version is minted whenever the file's *shape* changes — even additively.
+Because every object sets `additionalProperties: false`, a config cannot gain a
+new key (e.g. the top-level `scenarios` array added in v2) without a new schema
+version, so old binaries never silently accept fields they don't understand.
 
 **Rules:**
 
@@ -37,6 +42,12 @@ for as long as the file exists.
 
 ## Current versions
 
-| Version | Path                          | Status  | Introduced |
-| ------- | ----------------------------- | ------- | ---------- |
-| 1       | `v1/config.schema.json`       | current | v0.3.0     |
+| Version | Path                          | Status    | Introduced |
+| ------- | ----------------------------- | --------- | ---------- |
+| 1       | `v1/config.schema.json`       | supported | v0.3.0     |
+| 2       | `v2/config.schema.json`       | current   | v0.4.0     |
+
+v2 is a strict superset of v1 (endpoints unchanged, `scenarios` added), so any
+valid v1 config becomes a valid v2 config by bumping its `version` and `$schema`.
+`rkload init` and the spec importers still emit v1, since they only produce
+method-keyed endpoints.
