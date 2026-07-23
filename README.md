@@ -59,41 +59,7 @@ rkload -url https://api.example.com/health -c 50 -n 1000
 
 Output:
 
-```
-Load testing: https://api.example.com/health
-Workers: 50 | Requests: 1000 | Method: GET
-
---- Results ---
-Total requests:  1000
-Successful:      1000
-Errors:          0
-Total time:      5.563s
-Throughput:      179.77 req/sec
-
-Latency:
-  avg:    545ms
-  min:    368ms
-  max:    1.688s
-  p50:    488ms
-  p95:    1.207s
-  p99:    1.588s
-  stddev: 169ms
-
-Status codes:
-  HTTP 200: 1000 ████████████████████
-
-Latency distribution:
-     368ms - 500ms   :   823 ██████████████████████████████
-     500ms - 632ms   :   102 ███
-     632ms - 764ms   :    34 █
-     764ms - 896ms   :    14
-     896ms - 1.028s  :     8
-    1.028s - 1.16s   :     5
-     1.16s - 1.292s  :     7
-    1.292s - 1.424s  :     3
-    1.424s - 1.556s  :     2
-    1.556s - 1.688s  :     2
-```
+![rkload's plain-text report — totals, latency percentiles, a status-code histogram, and a bucketed latency distribution](docs/report.gif)
 
 ---
 
