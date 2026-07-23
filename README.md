@@ -277,7 +277,7 @@ Output is deterministic — re-running the importer on the same spec produces a 
 ```bash
 rkload update                     # check + install if newer
 rkload update --check             # only report, don't install
-rkload update --version v1.0.0    # pin or downgrade
+rkload update --version v0.3.0    # pin or downgrade
 rkload update --force             # reinstall even when already current
 ```
 
@@ -288,7 +288,7 @@ Output is the four standard lines (target → download → install → done) so 
 The first time you run any `rkload` command after 24h, the binary briefly checks for a newer release and prints a one-line notice to stderr before the run starts:
 
 ```text
-[update available] rkload v1.1.0 — run `rkload update` to upgrade
+[update available] rkload v0.4.0 — run `rkload update` to upgrade
 ```
 
 The notice is **silent on every failure** — a network blip never stands between you and your command. It's skipped automatically when:
@@ -305,10 +305,10 @@ State lives at `~/.rkload/update.json`. Within 24h of a check, the cached "lates
 
 `rkload` is under active development. See [ROADMAP.md](./ROADMAP.md) for the full feature progression:
 
-- **v1.0.0** — Engine, percentiles, multi-endpoint JSON configs (schema v1 in [`schemas/v1/config.schema.json`](./schemas/v1/config.schema.json); see [versioning policy](./schemas/README.md)), OpenAPI / Swagger / Postman import, `rkload init`, `rkload validate` with content-hash cache, `rkload update` for in-place upgrades, daily background "update available" notice ✅
-- **v1.1** — Scenario chains, auth helpers, variable extraction
-- **v1.2** — JSON / Markdown / HTML reporting, CI integration
-- **v2.0** — Reserved for breaking changes only (CLI / schema v1 are stable from v1.0)
+- **v0.1.0 – v0.3.x** — Engine, percentiles, multi-endpoint JSON configs (schema v1 in [`schemas/v1/config.schema.json`](./schemas/v1/config.schema.json); see [versioning policy](./schemas/README.md)), OpenAPI / Swagger / Postman import, `rkload init`, `rkload validate` with content-hash cache, `rkload update` for in-place upgrades, daily background "update available" notice ✅
+- **v0.4.0** — Scenario chains, auth helpers, variable extraction
+- **v0.5.0** — JSON / Markdown / HTML reporting, CI integration
+- **v1.0.0** — Reserved for the first stable release (breaking CLI / schema changes only)
 
 ---
 

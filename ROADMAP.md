@@ -6,9 +6,9 @@ Items here are aspirational, not commitments. Priorities shift based on real usa
 
 ---
 
-## v1.0.0 — First release ✅
+## Shipped so far (0.x)
 
-Everything below shipped as the inaugural published release. Earlier version numbers (v0.1.0 – v0.3.4) existed as development markers in the local git history but were never built into GitHub Releases.
+Everything below is implemented and available on the 0.x release line (tagged through v0.3.2). The project deliberately stays in 0.x while the CLI and config surface settle — additive features ship as 0.x minors, and a v1.0.0 major is reserved for the first stable release.
 
 ### Live TUI dashboard
 - [x] Auto-on when stdout is a TTY, plain-text path preserved everywhere else
@@ -63,7 +63,7 @@ Everything below shipped as the inaugural published release. Earlier version num
 
 ---
 
-## v1.1.0 — Scenarios
+## v0.4.0 — Scenarios
 
 The feature that justifies the name "scenario-driven."
 
@@ -75,7 +75,7 @@ The feature that justifies the name "scenario-driven."
 
 ---
 
-## v1.2.0 — Reporting & integration
+## v0.5.0 — Reporting & integration
 
 Make rkload useful in CI and team workflows.
 
@@ -98,13 +98,13 @@ Targets that aren't tied to a specific release yet:
 
 ---
 
-## v2.0.0 — Reserved
+## v1.0.0 — Reserved
 
-Major version bump only if a future change breaks the v1 CLI surface or `schemas/v1/config.schema.json` contract. Additive features ship as v1.x.
+The first stable release. Cut once the CLI surface and config schema have settled; until then, additive features ship as 0.x minors and breaking changes are allowed between them. Config schema versions evolve independently under `schemas/vN/`.
 
 ---
 
-## Beyond v2.0 — Maybe
+## Beyond v1.0 — Maybe
 
 Ideas being considered, not committed:
 
