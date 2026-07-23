@@ -1,6 +1,6 @@
 # httpbin — worked example for rkload
 
-Five short configs that exercise the load-testing features rkload offers, against [httpbin.org](https://httpbin.org) — a public HTTP request-and-response service designed for client testing. Run any of them out of the box; no signup, no credentials, no setup beyond having the rkload binary on `PATH`.
+Nine short configs that exercise the load-testing features rkload offers, against [httpbin.org](https://httpbin.org) — a public HTTP request-and-response service designed for client testing. Five are single-request examples; four are multi-step **scenarios** (v2 schema) that chain requests, extract and inject variables, assert on responses, and authenticate. Run any of them out of the box; no signup, no credentials, no setup beyond having the rkload binary on `PATH`.
 
 This example exists so you can:
 
@@ -25,7 +25,7 @@ Each config is independent. From the repo root:
 
 Or `cd examples/httpbin && ../../bin/rkload -config configs/simple.rkload.json` if you prefer.
 
-## The five configs
+## The single-request configs
 
 ### `simple.rkload.json` — hello world
 
@@ -82,6 +82,49 @@ If you're load-testing a real authenticated API, this is the pattern: drop your 
 Echoes a fake "checkout" event through httpbin's `/post` endpoint. The rkload loader creates a fresh `strings.NewReader` per request, so the same body string drives every concurrent worker safely.
 
 Pattern to copy when stress-testing your own create-resource endpoints: put the JSON payload as a string in `body`, set `Content-Type: application/json`, and rkload handles the rest.
+
+## The scenario configs
+
+These use the **v2 schema** (`scenarios`): each virtual user runs an ordered
+chain of steps, carrying state between them. They're deliberately light on
+httpbin (`vus: 2`, `iterations: 5`) — bump those for real load. Every one is
+self-verifying: the assertions pass only if the feature actually worked.
+
+### `scenario-extract.rkload.json` — extract a value and inject it
+
+A two-step chain that proves variable flow end to end:
+
+1. `GET /response-headers?X-Token=chain-demo-42` — httpbin echoes that value in
+   its JSON body; the step `extract`s it into `${token}`.
+2. `GET /anything` with `Authorization: Bearer ${token}` — httpbin echoes the
+   request back, and the step asserts the body **contains `chain-demo-42`**.
+
+Because the injected value shows up in step 2's echoed response, a green run is
+proof the extract → inject path works. Swap `from: "json"` for
+`from: "header"`, `"status"`, or `"regex"` to read the value a different way.
+
+### `scenario-assert.rkload.json` — all three assertion types
+
+One step against httpbin's fixed `/json` document, asserting `status` equals
+200, `body-contains` `"slideshow"`, and two `json-equals` checks on nested
+paths (`slideshow.title`, `slideshow.author`). A failed assertion aborts the
+chain and flips the exit code — the pattern for turning a load test into a CI
+gate.
+
+### `scenario-bearer-auth.rkload.json` — bearer auth
+
+A scenario-level `auth` block of `type: "bearer"` stamps
+`Authorization: Bearer rkload-demo-token` on the request to `/bearer`. httpbin
+echoes the token back, so the step asserts `authenticated == true` **and**
+`token == rkload-demo-token`. Put a real token in `${ENV}` form
+(`"token": "${API_TOKEN}"`) to keep it out of the file.
+
+### `scenario-basic-auth.rkload.json` — basic auth
+
+An `auth` block of `type: "basic"` with `username` / `password` base64-encodes
+the credentials for `/basic-auth/rkload/s3cret`; the step asserts
+`authenticated == true` and `user == rkload`. A step can also carry its own
+`auth`, which overrides the scenario's for that step.
 
 ## Adapting these to your own API
 

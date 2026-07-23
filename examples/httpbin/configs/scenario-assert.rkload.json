@@ -1,0 +1,26 @@
+{
+  "$schema": "https://raw.githubusercontent.com/RKInnovate/rkload/main/schemas/v2/config.schema.json",
+  "version": 2,
+
+  "scenarios": [
+    {
+      "name": "assert-json-response",
+      "vus": 2,
+      "iterations": 5,
+      "timeout": "15s",
+      "steps": [
+        {
+          "name": "fetch-json",
+          "method": "GET",
+          "url": "https://httpbin.org/json",
+          "assert": [
+            { "type": "status", "equals": 200 },
+            { "type": "body-contains", "value": "slideshow" },
+            { "type": "json-equals", "path": "slideshow.title", "value": "Sample Slide Show" },
+            { "type": "json-equals", "path": "slideshow.author", "value": "Yours Truly" }
+          ]
+        }
+      ]
+    }
+  ]
+}
