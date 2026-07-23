@@ -109,6 +109,16 @@ func TestToLoaderScenario_MapsExtractAssert(t *testing.T) {
 	}
 }
 
+func TestToLoaderAuth_MapsFieldsAndNil(t *testing.T) {
+	if toLoaderAuth(nil) != nil {
+		t.Error("nil config auth should map to nil loader auth")
+	}
+	a := toLoaderAuth(&config.Auth{Type: "basic", Username: "u", Password: "p", TokenURL: "https://t/"})
+	if a == nil || a.Type != "basic" || a.Username != "u" || a.Password != "p" || a.TokenURL != "https://t/" {
+		t.Errorf("auth fields not mapped: %+v", a)
+	}
+}
+
 func TestAdaptStepResult_AssertErrIsError(t *testing.T) {
 	r := adaptStepResult(loader.StepResult{StatusCode: 200, AssertErr: errors.New("boom")})
 	if r.Err == nil {

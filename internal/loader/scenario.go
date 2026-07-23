@@ -21,6 +21,7 @@ type Step struct {
 	URL     string
 	Headers map[string]string
 	Body    string
+	Auth    *Auth // overrides the scenario-level auth for this step
 	Extract []ExtractRule
 	Assert  []AssertRule
 }
@@ -33,6 +34,7 @@ type ScenarioOptions struct {
 	Iterations int
 	Timeout    time.Duration
 	Steps      []Step
+	Auth       *Auth // applied to every step unless the step overrides it
 	// OnResult, if set, is invoked once per executed step in drain order
 	// (the same contract as Options.OnResult, but per step). The returned
 	// slice is exactly the concatenation of all OnResult calls.
@@ -73,7 +75,7 @@ func RunScenario(opts ScenarioOptions) []StepResult {
 			for iter := range jobs {
 				vars := map[string]string{}
 				for si := range opts.Steps {
-					sr := execStep(client, opts.Steps[si], si, iter, vars)
+					sr := execStep(client, opts.Steps[si], opts.Auth, si, iter, vars)
 					results <- sr
 					if sr.Err != nil || sr.AssertErr != nil {
 						break // abort the rest of this chain iteration
@@ -98,7 +100,7 @@ func RunScenario(opts ScenarioOptions) []StepResult {
 // vars, then runs the step's extract and assert rules. The response body
 // is read only when a rule needs it; otherwise it is drained (so the VU's
 // connection can be reused) and discarded.
-func execStep(client *http.Client, step Step, stepIndex, iter int, vars map[string]string) StepResult {
+func execStep(client *http.Client, step Step, scenAuth *Auth, stepIndex, iter int, vars map[string]string) StepResult {
 	sr := StepResult{Iteration: iter, StepIndex: stepIndex, StepName: step.Name}
 
 	var body io.Reader
@@ -109,6 +111,17 @@ func execStep(client *http.Client, step Step, stepIndex, iter int, vars map[stri
 	if err != nil {
 		sr.Err = err
 		return sr
+	}
+	// Apply the effective auth (step overrides scenario) before explicit
+	// headers, so an explicit per-step header still wins.
+	if effAuth := step.Auth; effAuth != nil || scenAuth != nil {
+		if effAuth == nil {
+			effAuth = scenAuth
+		}
+		if err := applyAuth(req, *effAuth, vars); err != nil {
+			sr.Err = err
+			return sr
+		}
 	}
 	for k, v := range step.Headers {
 		req.Header.Set(k, interpolate(v, vars))
