@@ -329,6 +329,11 @@ func (s *Scenario) validate(index int) error {
 			return fmt.Errorf("config: %s: invalid timeout %q: %w", loc, s.Timeout, err)
 		}
 	}
+	if s.Auth != nil {
+		if err := s.Auth.validate(loc); err != nil {
+			return err
+		}
+	}
 	if len(s.Steps) == 0 {
 		return fmt.Errorf("config: %s: must define at least one step", loc)
 	}
@@ -354,6 +359,101 @@ func (st *Step) validate(scenarioLoc string, index int) error {
 	}
 	if len(st.Name) > 80 {
 		return fmt.Errorf("config: %s: name exceeds 80 characters", loc)
+	}
+	for i := range st.Extract {
+		if err := st.Extract[i].validate(loc, i); err != nil {
+			return err
+		}
+	}
+	for i := range st.Assert {
+		if err := st.Assert[i].validate(loc, i); err != nil {
+			return err
+		}
+	}
+	if st.Auth != nil {
+		if err := st.Auth.validate(loc); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *ExtractRule) validate(stepLoc string, index int) error {
+	loc := fmt.Sprintf("%s.extract[%d]", stepLoc, index)
+
+	if r.Var == "" {
+		return fmt.Errorf(`config: %s: "var" is required`, loc)
+	}
+	switch r.From {
+	case "json":
+		if r.Path == "" {
+			return fmt.Errorf(`config: %s: "path" is required for from=json`, loc)
+		}
+	case "header":
+		if r.Name == "" {
+			return fmt.Errorf(`config: %s: "name" is required for from=header`, loc)
+		}
+	case "regex":
+		if r.Pattern == "" {
+			return fmt.Errorf(`config: %s: "pattern" is required for from=regex`, loc)
+		}
+		if _, err := regexp.Compile(r.Pattern); err != nil {
+			return fmt.Errorf("config: %s: invalid regex %q: %w", loc, r.Pattern, err)
+		}
+	case "status":
+		// no additional fields required
+	case "":
+		return fmt.Errorf(`config: %s: "from" is required (want json|header|status|regex)`, loc)
+	default:
+		return fmt.Errorf("config: %s: unknown extract source %q (want json|header|status|regex)", loc, r.From)
+	}
+	return nil
+}
+
+func (a *AssertRule) validate(stepLoc string, index int) error {
+	loc := fmt.Sprintf("%s.assert[%d]", stepLoc, index)
+
+	switch a.Type {
+	case "status":
+		if a.Equals == 0 {
+			return fmt.Errorf(`config: %s: "equals" (expected status code) is required for type=status`, loc)
+		}
+	case "body-contains":
+		if a.Value == "" {
+			return fmt.Errorf(`config: %s: "value" is required for type=body-contains`, loc)
+		}
+	case "json-equals":
+		if a.Path == "" {
+			return fmt.Errorf(`config: %s: "path" is required for type=json-equals`, loc)
+		}
+	case "":
+		return fmt.Errorf(`config: %s: "type" is required (want status|body-contains|json-equals)`, loc)
+	default:
+		return fmt.Errorf("config: %s: unknown assert type %q (want status|body-contains|json-equals)", loc, a.Type)
+	}
+	return nil
+}
+
+func (a *Auth) validate(ownerLoc string) error {
+	loc := ownerLoc + ".auth"
+
+	switch a.Type {
+	case "bearer", "apikey":
+		if a.Token == "" {
+			return fmt.Errorf(`config: %s: "token" is required for %s auth`, loc, a.Type)
+		}
+	case "basic":
+		if a.Username == "" {
+			return fmt.Errorf(`config: %s: "username" is required for basic auth`, loc)
+		}
+	case "oauth2":
+		if a.ClientID == "" || a.TokenURL == "" {
+			return fmt.Errorf(`config: %s: "clientId" and "tokenUrl" are required for oauth2 auth`, loc)
+		}
+	case "":
+		return fmt.Errorf(`config: %s: "type" is required (want bearer|apikey|basic|oauth2)`, loc)
+	default:
+		return fmt.Errorf("config: %s: unknown auth type %q (want bearer|apikey|basic|oauth2)", loc, a.Type)
 	}
 	return nil
 }
