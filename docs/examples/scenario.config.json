@@ -1,0 +1,45 @@
+{
+  "$schema": "https://raw.githubusercontent.com/RKInnovate/rkload/main/schemas/v2/config.schema.json",
+  "version": 2,
+
+  "scenarios": [
+    {
+      "name": "login-list-logout",
+      "vus": 10,
+      "iterations": 200,
+      "timeout": "10s",
+      "steps": [
+        {
+          "name": "login",
+          "method": "POST",
+          "url": "https://api.example.com/auth/login",
+          "headers": { "Content-Type": "application/json" },
+          "body": "{\"email\":\"${EMAIL}\",\"password\":\"${PASSWORD}\"}",
+          "extract": [
+            { "var": "token", "from": "json", "path": "data.accessToken" }
+          ],
+          "assert": [
+            { "type": "status", "equals": 200 },
+            { "type": "json-equals", "path": "data.tokenType", "value": "Bearer" }
+          ]
+        },
+        {
+          "name": "list-projects",
+          "method": "GET",
+          "url": "https://api.example.com/projects",
+          "auth": { "type": "bearer", "token": "${token}" },
+          "assert": [
+            { "type": "status", "equals": 200 },
+            { "type": "body-contains", "value": "projects" }
+          ]
+        },
+        {
+          "name": "logout",
+          "method": "POST",
+          "url": "https://api.example.com/auth/logout",
+          "auth": { "type": "bearer", "token": "${token}" }
+        }
+      ]
+    }
+  ]
+}

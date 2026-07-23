@@ -109,7 +109,7 @@ Establishes a steady-state throughput number you can track over time.
 - Run from a machine geographically close to the target. Network RTT can dominate measurements otherwise.
 - Run multiple times. The first run after deployment usually includes cold-start cost.
 - For cloud autoscaled services, run a "warmup" test first, then your real measurement.
-- Consider whether you actually want to test the root or health endpoint, or your real API workflow. The latter requires scenarios (v0.4.0).
+- Consider whether you actually want to test the root or health endpoint, or your real API workflow. The latter is what [scenarios](#scenarios-multi-step-chains) are for.
 
 ## Multi-endpoint configs
 
@@ -157,10 +157,105 @@ the editor view and runtime view of a partially-specified endpoint match.
 ### Validation
 
 Configs are rejected at load time (clean error, exit 1) for: missing
-`version`, version other than 1, `$schema` URL whose `vN` segment doesn't
+`version`, an unsupported version, `$schema` URL whose `vN` segment doesn't
 match `version`, missing `url`, non-`http(s)` scheme, malformed `timeout`,
 out-of-range `c`, name longer than 80 chars, and unknown top-level fields
 (catches typos like `TRACE` or method-name case mismatches).
+
+## Scenarios (multi-step chains)
+
+A **scenario** is an ordered chain of requests that each virtual user runs in
+sequence, carrying state between steps: extract a value from one response (a
+token, an id) and inject it into a later request. Scenarios need schema v2 — a
+strict superset of v1, so a v2 config can still declare method-keyed endpoints
+alongside its `scenarios`.
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/RKInnovate/rkload/main/schemas/v2/config.schema.json",
+  "version": 2,
+  "scenarios": [
+    {
+      "name": "login-list-logout",
+      "vus": 10,
+      "iterations": 200,
+      "timeout": "10s",
+      "steps": [
+        {
+          "name": "login", "method": "POST",
+          "url": "https://api.example.com/auth/login",
+          "headers": { "Content-Type": "application/json" },
+          "body": "{\"email\":\"${EMAIL}\",\"password\":\"${PASSWORD}\"}",
+          "extract": [ { "var": "token", "from": "json", "path": "data.accessToken" } ],
+          "assert": [ { "type": "status", "equals": 200 } ]
+        },
+        {
+          "name": "list", "method": "GET",
+          "url": "https://api.example.com/projects",
+          "auth": { "type": "bearer", "token": "${token}" },
+          "assert": [ { "type": "status", "equals": 200 } ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+```bash
+rkload -config scenario.config.json
+```
+
+- **`vus`** — concurrent virtual users (mirrors an endpoint's `c`);
+  **`iterations`** — total chain runs across all VUs (mirrors `requests`).
+  Both default to `10` / `100`.
+- **`timeout`** — per-request timeout applied to every step.
+
+### Variables: extract and inject
+
+Each step may `extract` values from its response and bind them to variables
+usable as `${name}` in a later step's URL, headers, body, or auth:
+
+| `from`   | reads                                   | field                             |
+|----------|-----------------------------------------|-----------------------------------|
+| `json`   | a dotted path into the JSON body        | `path` (e.g. `data.items.0.id`)   |
+| `header` | a response header                       | `name`                            |
+| `status` | the numeric status code                 | —                                 |
+| `regex`  | the first capture group of a body match | `pattern`                         |
+
+`${name}` resolves against extracted variables first, then the process
+environment — so `${API_TOKEN}` reads from the env while `${token}` comes from a
+prior `extract`. An unresolved placeholder is left verbatim so the gap is
+visible. Environment interpolation keeps secrets out of the config file.
+
+### Assertions
+
+Each step may `assert` conditions on its response. A failed assertion marks the
+step failed, aborts the rest of that chain iteration, and drives the non-zero
+exit code (load-bearing for CI):
+
+| `type`          | passes when                | fields          |
+|-----------------|----------------------------|-----------------|
+| `status`        | status code equals         | `equals`        |
+| `body-contains` | body contains a substring  | `value`         |
+| `json-equals`   | value at a JSON path equals | `path`, `value` |
+
+### Auth
+
+An optional `auth` block authenticates a scenario's requests, applied to every
+step unless the step provides its own (a step's explicit header still wins):
+
+| `type`   | sets                                            |
+|----------|-------------------------------------------------|
+| `bearer` | `Authorization: Bearer <token>`                 |
+| `apikey` | a header (default `Authorization`) to `<token>` |
+| `basic`  | `Authorization: Basic base64(user:pass)`        |
+
+Credential fields interpolate `${ENV}` placeholders, so tokens live in the
+environment, not the file. `oauth2` is reserved in the schema but not yet
+executed (it returns a clear error).
+
+A worked example lives in
+[`docs/examples/scenario.config.json`](./examples/scenario.config.json).
 
 ## Generating configs from API specs
 
@@ -283,7 +378,6 @@ rkload import postman --var baseUrl=https://prod.example.com \
 
 ## Coming soon
 
-- **v0.4.0** — Multi-step scenarios with auth chains
 - **v0.5.0** — `-output json` / Markdown / HTML for machine-readable results and CI integration
 
 See [ROADMAP.md](../ROADMAP.md) for the full plan.

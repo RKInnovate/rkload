@@ -8,6 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Multi-step **scenarios** (schema v2): a top-level `scenarios`
+  array of ordered request chains. Each virtual user runs the
+  steps in sequence, carrying variable state across the chain;
+  `vus` / `iterations` mirror an endpoint's `c` / `requests`.
+  Run via `rkload -config`, in both the plain and live-TUI paths
+- Variable **extraction** from a step's response — dotted JSON
+  path, response header, status code, or regex capture — bound to
+  `${name}` and **injected** into later steps' URL, headers, body,
+  or auth. `${name}` resolves extracted variables first, then the
+  process environment, so secrets stay out of the config file
+- Step **assertions**: `status`, `body-contains`, and
+  `json-equals`. A failed assertion aborts the rest of that chain
+  iteration and drives the non-zero exit code
+- **Auth helpers** at scenario or step level: `bearer`, `apikey`,
+  and `basic`, with `${ENV}` interpolation on credential fields.
+  A step's auth overrides the scenario's. `oauth2` is reserved in
+  the schema but not yet executed
+- Published immutable **schema v2**
+  ([`schemas/v2/config.schema.json`](./schemas/v2/config.schema.json)),
+  a strict superset of v1 — existing v1 configs keep working
+  unchanged and the runtime validates both versions
 - Live TUI dashboard (TTY-only) replaces plain-text per-endpoint
   progress output while a `-config` run is in flight. Renders
   per-endpoint progress bars with counter + throughput + live
