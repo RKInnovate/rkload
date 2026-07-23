@@ -52,6 +52,7 @@ func toLoaderScenario(s config.Scenario) loader.ScenarioOptions {
 			URL:     st.URL,
 			Headers: st.Headers,
 			Body:    st.Body,
+			Auth:    toLoaderAuth(st.Auth),
 			Extract: toLoaderExtracts(st.Extract),
 			Assert:  toLoaderAsserts(st.Assert),
 		}
@@ -62,6 +63,26 @@ func toLoaderScenario(s config.Scenario) loader.ScenarioOptions {
 		Iterations: s.Iterations,
 		Timeout:    timeout,
 		Steps:      steps,
+		Auth:       toLoaderAuth(s.Auth),
+	}
+}
+
+// toLoaderAuth maps a config.Auth onto the loader's copy. Returns nil for
+// a nil input (no auth configured).
+func toLoaderAuth(a *config.Auth) *loader.Auth {
+	if a == nil {
+		return nil
+	}
+	return &loader.Auth{
+		Type:         a.Type,
+		Token:        a.Token,
+		Header:       a.Header,
+		Username:     a.Username,
+		Password:     a.Password,
+		ClientID:     a.ClientID,
+		ClientSecret: a.ClientSecret,
+		TokenURL:     a.TokenURL,
+		Scopes:       a.Scopes,
 	}
 }
 
