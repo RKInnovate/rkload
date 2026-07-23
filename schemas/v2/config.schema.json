@@ -1,0 +1,302 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/RKInnovate/rkload/main/schemas/v2/config.schema.json",
+  "title": "rkload Configuration (v2)",
+  "description": "Configuration file for rkload, schema version 2. A strict superset of v1: it keeps the method-keyed endpoint arrays and adds a top-level \"scenarios\" array of ordered, stateful request chains (extract a value from one step's response, inject it as ${var} into a later step). Configs MUST pin a versioned $schema URL (schemas/v2/...) — this file is immutable once published; future schema changes ship as schemas/v3/...",
+  "type": "object",
+
+  "required": ["version"],
+
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "format": "uri",
+      "description": "Reference to this JSON Schema. Including this field enables autocomplete and validation in editors like VS Code."
+    },
+    "version": {
+      "type": "integer",
+      "const": 2,
+      "description": "Config schema version. Must be 2 for this schema, and MUST match the version segment of the $schema URL (e.g. .../schemas/v2/...). The runtime cross-checks both and rejects mismatches."
+    },
+    "GET":       { "$ref": "#/$defs/endpoints" },
+    "POST":      { "$ref": "#/$defs/endpoints" },
+    "PUT":       { "$ref": "#/$defs/endpoints" },
+    "PATCH":     { "$ref": "#/$defs/endpoints" },
+    "DELETE":    { "$ref": "#/$defs/endpoints" },
+    "HEAD":      { "$ref": "#/$defs/endpoints" },
+    "OPTIONS":   { "$ref": "#/$defs/endpoints" },
+    "scenarios": { "$ref": "#/$defs/scenarios" }
+  },
+
+  "additionalProperties": false,
+
+  "$defs": {
+    "endpoints": {
+      "type": "array",
+      "description": "List of endpoints to load test under this HTTP method. May be empty.",
+      "items": { "$ref": "#/$defs/endpoint" }
+    },
+
+    "endpoint": {
+      "type": "object",
+      "title": "Endpoint",
+      "description": "A single HTTP endpoint to load test.",
+      "required": ["url"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Optional human-readable label for this endpoint, used in reports.",
+          "minLength": 1,
+          "maxLength": 80,
+          "examples": ["billing-plans-list", "auth-login"]
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://",
+          "description": "Target URL. Must include scheme (http:// or https://).",
+          "examples": ["https://api.example.com/v1/users"]
+        },
+        "headers": {
+          "type": "object",
+          "description": "HTTP headers sent with each request. All values must be strings.",
+          "additionalProperties": { "type": "string" }
+        },
+        "body": {
+          "type": "string",
+          "description": "Request body sent verbatim. For JSON payloads, supply a JSON-encoded string. Empty string means no body.",
+          "default": ""
+        },
+        "c": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000,
+          "default": 10,
+          "description": "Number of concurrent workers for this endpoint."
+        },
+        "requests": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 100,
+          "description": "Total number of requests to send to this endpoint."
+        },
+        "timeout": {
+          "type": "string",
+          "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+          "default": "30s",
+          "description": "Per-request timeout as a Go duration string (e.g. \"500ms\", \"30s\", \"1m30s\", \"1.5h\")."
+        }
+      }
+    },
+
+    "scenarios": {
+      "type": "array",
+      "description": "List of ordered request chains. Each scenario is run by its own pool of virtual users. May be empty.",
+      "items": { "$ref": "#/$defs/scenario" }
+    },
+
+    "scenario": {
+      "type": "object",
+      "title": "Scenario",
+      "description": "An ordered chain of HTTP steps executed in sequence by each virtual user, carrying variable state across the chain.",
+      "required": ["steps"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Optional human-readable label for this scenario, used in reports.",
+          "minLength": 1,
+          "maxLength": 80,
+          "examples": ["login-call-logout"]
+        },
+        "vus": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000,
+          "default": 10,
+          "description": "Number of concurrent virtual users running the chain (mirrors an endpoint's \"c\")."
+        },
+        "iterations": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 100,
+          "description": "Total number of chain runs, distributed across the virtual users (mirrors \"requests\")."
+        },
+        "timeout": {
+          "type": "string",
+          "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+          "default": "30s",
+          "description": "Per-request timeout applied to every step, as a Go duration string."
+        },
+        "auth": { "$ref": "#/$defs/auth" },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "description": "The ordered steps of the chain. At least one is required.",
+          "items": { "$ref": "#/$defs/step" }
+        }
+      }
+    },
+
+    "step": {
+      "type": "object",
+      "title": "Step",
+      "description": "A single request in a scenario chain.",
+      "required": ["url"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Optional label for this step, used in reports."
+        },
+        "method": {
+          "type": "string",
+          "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+          "default": "GET",
+          "description": "HTTP method for this step."
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://",
+          "description": "Target URL. May contain ${var} placeholders resolved from extracted variables or the environment.",
+          "examples": ["https://api.example.com/me"]
+        },
+        "headers": {
+          "type": "object",
+          "description": "HTTP headers sent with this step. Values may contain ${var} placeholders.",
+          "additionalProperties": { "type": "string" }
+        },
+        "body": {
+          "type": "string",
+          "description": "Request body sent verbatim. May contain ${var} placeholders.",
+          "default": ""
+        },
+        "auth": { "$ref": "#/$defs/auth" },
+        "extract": {
+          "type": "array",
+          "description": "Rules that bind values from this step's response to variables usable as ${var} in later steps.",
+          "items": { "$ref": "#/$defs/extractRule" }
+        },
+        "assert": {
+          "type": "array",
+          "description": "Checks against this step's response. A failed assertion marks the step failed and aborts the rest of that chain iteration.",
+          "items": { "$ref": "#/$defs/assertRule" }
+        }
+      }
+    },
+
+    "extractRule": {
+      "type": "object",
+      "title": "Extract rule",
+      "description": "Pulls a value out of a step's response and binds it to a variable.",
+      "required": ["var", "from"],
+      "additionalProperties": false,
+      "properties": {
+        "var": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Variable name to bind. Referenced as ${var} in later steps."
+        },
+        "from": {
+          "type": "string",
+          "enum": ["json", "header", "status", "regex"],
+          "description": "Where to read the value from."
+        },
+        "path": {
+          "type": "string",
+          "description": "from=json: dotted path into the JSON body, e.g. data.items.0.id.",
+          "examples": ["data.accessToken", "items.0.id"]
+        },
+        "name": {
+          "type": "string",
+          "description": "from=header: response header name.",
+          "examples": ["X-Request-Id"]
+        },
+        "pattern": {
+          "type": "string",
+          "description": "from=regex: pattern applied to the body; the first capture group is bound."
+        }
+      }
+    },
+
+    "assertRule": {
+      "type": "object",
+      "title": "Assert rule",
+      "description": "Checks a step's response.",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["status", "body-contains", "json-equals"],
+          "description": "The kind of check to perform."
+        },
+        "equals": {
+          "type": "integer",
+          "description": "type=status: the expected status code."
+        },
+        "value": {
+          "type": "string",
+          "description": "type=body-contains: substring the body must contain. type=json-equals: expected value at the given path (compared as a string)."
+        },
+        "path": {
+          "type": "string",
+          "description": "type=json-equals: dotted JSON path to compare."
+        }
+      }
+    },
+
+    "auth": {
+      "type": "object",
+      "title": "Auth",
+      "description": "How to authenticate a scenario's requests. Applied to every step unless a step overrides it. Values may contain ${var} placeholders (e.g. ${API_TOKEN} from the environment). The oauth2 type is reserved in this schema but not yet executed by the runtime.",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["bearer", "apikey", "basic", "oauth2"],
+          "description": "The authentication scheme."
+        },
+        "token": {
+          "type": "string",
+          "description": "bearer / apikey: the token or key value."
+        },
+        "header": {
+          "type": "string",
+          "description": "apikey: the header name to set (defaults to Authorization)."
+        },
+        "username": {
+          "type": "string",
+          "description": "basic: the username."
+        },
+        "password": {
+          "type": "string",
+          "description": "basic: the password."
+        },
+        "clientId": {
+          "type": "string",
+          "description": "oauth2: the client identifier."
+        },
+        "clientSecret": {
+          "type": "string",
+          "description": "oauth2: the client secret."
+        },
+        "tokenUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "oauth2: the token endpoint URL."
+        },
+        "scopes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "oauth2: requested scopes."
+        }
+      }
+    }
+  }
+}
