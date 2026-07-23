@@ -1,0 +1,35 @@
+{
+  "$schema": "https://raw.githubusercontent.com/RKInnovate/rkload/main/schemas/v2/config.schema.json",
+  "version": 2,
+
+  "GET": [
+    { "name": "homepage", "url": "http://127.0.0.1:8799/fast",   "c": 8, "requests": 500 },
+    { "name": "search",   "url": "http://127.0.0.1:8799/slow",   "c": 6, "requests": 100 },
+    { "name": "reports",  "url": "http://127.0.0.1:8799/slower", "c": 4, "requests": 44 }
+  ],
+
+  "scenarios": [
+    {
+      "name": "checkout",
+      "vus": 4,
+      "iterations": 44,
+      "timeout": "10s",
+      "steps": [
+        {
+          "name": "login",
+          "method": "POST",
+          "url": "http://127.0.0.1:8799/login",
+          "extract": [ { "var": "token", "from": "json", "path": "token" } ],
+          "assert": [ { "type": "status", "equals": 200 } ]
+        },
+        {
+          "name": "pay",
+          "method": "POST",
+          "url": "http://127.0.0.1:8799/pay",
+          "auth": { "type": "bearer", "token": "${token}" },
+          "assert": [ { "type": "status", "equals": 200 } ]
+        }
+      ]
+    }
+  ]
+}
