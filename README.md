@@ -151,19 +151,7 @@ Endpoints run **sequentially per group** so each gets its own clean per-endpoint
 
 **Live dashboard (TTY only)** — when stdout is a terminal, rkload renders a live dashboard during the run instead of streaming text:
 
-```text
-rkload — live  Endpoints: 3   Requests: 127/300 (42%)   Elapsed: 12.4s
-
-  GET httpbin-get        █████████░░░░░░░░░░░    47/100    18.3 r/s   p95 425ms
-  GET 1s-delay           ████░░░░░░░░░░░░░░░░    25/100     7.1 r/s   p95 1.1s
-  GET 2s-delay           (waiting)
-
-Status codes   200:97   429:30
-Latency        p50 312ms   p95 1.05s   p99 1.2s
-Throughput     ▁▂▃▄▅▆▇█▇▆▅▄▃▂▁                       22.4 r/s
-
-[↑↓] select   [↵/→] drill in   [q] quit
-```
+![rkload's live TUI dashboard — per-row progress bars, colour-coded status distribution, latency percentiles, and a throughput sparkline, across endpoints and scenario steps](docs/demo.gif)
 
 Keybindings:
 
