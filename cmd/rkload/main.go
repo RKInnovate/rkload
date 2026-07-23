@@ -191,15 +191,18 @@ func runFromConfig(path string) int {
 		return 1
 	}
 	jobs := flattenJobs(bundles)
-	if len(jobs) == 0 {
-		fmt.Fprintln(os.Stderr, "config: no endpoints in the loaded config(s)")
+	scenarios := flattenScenarios(bundles, len(jobs))
+	if len(jobs) == 0 && len(scenarios) == 0 {
+		fmt.Fprintln(os.Stderr, "config: no endpoints or scenarios in the loaded config(s)")
 		return 1
 	}
 
-	if isTerminal(os.Stdout) {
+	// The live TUI dashboard doesn't render scenario steps yet, so any
+	// config that declares scenarios uses the plain path for now.
+	if isTerminal(os.Stdout) && len(scenarios) == 0 {
 		return runFromConfigTUI(bundles, jobs)
 	}
-	return runFromConfigPlain(bundles, jobs)
+	return runFromConfigPlain(bundles, jobs, scenarios)
 }
 
 // resolveConfigs handles both forms of the -config argument. A
@@ -301,7 +304,7 @@ func printBundlesHeader(bundles []configBundle) {
 // runFromConfigPlain is the legacy text path: per-endpoint progress
 // printed inline, then the overall aggregate. Used when stdout is
 // not a TTY.
-func runFromConfigPlain(bundles []configBundle, jobs []endpointJob) int {
+func runFromConfigPlain(bundles []configBundle, jobs []endpointJob, scenarios []scenarioJob) int {
 	printBundlesHeader(bundles)
 
 	var totalRequests, totalErrors int
@@ -323,8 +326,16 @@ func runFromConfigPlain(bundles []configBundle, jobs []endpointJob) int {
 		totalErrors += summary.Errors
 	}
 
+	// Scenarios run after the flat endpoints, one report per step.
+	sReqs, sErrs := runScenariosPlain(os.Stdout, scenarios)
+	totalRequests += sReqs
+	totalErrors += sErrs
+
 	fmt.Printf("=== Overall ===\n")
 	fmt.Printf("Endpoints tested: %d\n", len(jobs))
+	if len(scenarios) > 0 {
+		fmt.Printf("Scenarios tested: %d\n", len(scenarios))
+	}
 	fmt.Printf("Total requests:   %d\n", totalRequests)
 	fmt.Printf("Total errors:     %d\n", totalErrors)
 
