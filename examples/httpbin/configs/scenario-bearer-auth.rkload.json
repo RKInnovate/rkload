@@ -1,0 +1,26 @@
+{
+  "$schema": "https://raw.githubusercontent.com/RKInnovate/rkload/main/schemas/v2/config.schema.json",
+  "version": 2,
+
+  "scenarios": [
+    {
+      "name": "bearer-auth",
+      "vus": 2,
+      "iterations": 5,
+      "timeout": "15s",
+      "auth": { "type": "bearer", "token": "rkload-demo-token" },
+      "steps": [
+        {
+          "name": "call-bearer",
+          "method": "GET",
+          "url": "https://httpbin.org/bearer",
+          "assert": [
+            { "type": "status", "equals": 200 },
+            { "type": "json-equals", "path": "authenticated", "value": "true" },
+            { "type": "json-equals", "path": "token", "value": "rkload-demo-token" }
+          ]
+        }
+      ]
+    }
+  ]
+}

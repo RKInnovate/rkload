@@ -1,0 +1,26 @@
+{
+  "$schema": "https://raw.githubusercontent.com/RKInnovate/rkload/main/schemas/v2/config.schema.json",
+  "version": 2,
+
+  "scenarios": [
+    {
+      "name": "basic-auth",
+      "vus": 2,
+      "iterations": 5,
+      "timeout": "15s",
+      "auth": { "type": "basic", "username": "rkload", "password": "s3cret" },
+      "steps": [
+        {
+          "name": "call-basic-auth",
+          "method": "GET",
+          "url": "https://httpbin.org/basic-auth/rkload/s3cret",
+          "assert": [
+            { "type": "status", "equals": 200 },
+            { "type": "json-equals", "path": "authenticated", "value": "true" },
+            { "type": "json-equals", "path": "user", "value": "rkload" }
+          ]
+        }
+      ]
+    }
+  ]
+}
