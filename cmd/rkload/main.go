@@ -197,12 +197,43 @@ func runFromConfig(path string) int {
 		return 1
 	}
 
-	// The live TUI dashboard doesn't render scenario steps yet, so any
-	// config that declares scenarios uses the plain path for now.
-	if isTerminal(os.Stdout) && len(scenarios) == 0 {
-		return runFromConfigTUI(bundles, jobs)
+	if isTerminal(os.Stdout) {
+		return runFromConfigTUI(bundles, jobs, scenarios)
 	}
 	return runFromConfigPlain(bundles, jobs, scenarios)
+}
+
+// row is a display descriptor for one dashboard/summary line. Both flat
+// endpoints and scenario steps collapse to a row so the TUI and the
+// post-run summary helpers can treat them uniformly, keyed by the flat
+// idx that also indexes the summaries/done slices.
+type row struct {
+	method string
+	label  string
+	idx    int
+}
+
+// buildTUIRows produces the TUI's Endpoint slice and the parallel row
+// descriptors: one entry per flat endpoint, then one per scenario step
+// (labelled "scenario/step"), preserving the flat idx assigned by
+// flattenJobs / flattenScenarios.
+func buildTUIRows(jobs []endpointJob, scenarios []scenarioJob) ([]tui.Endpoint, []row) {
+	endpoints := make([]tui.Endpoint, 0, len(jobs))
+	rows := make([]row, 0, len(jobs))
+	for _, job := range jobs {
+		endpoints = append(endpoints, tui.EndpointFromConfig(job.method, job.ep))
+		rows = append(rows, row{method: job.method, label: endpointLabel(job.ep), idx: job.idx})
+	}
+	for _, sj := range scenarios {
+		for i, st := range sj.scen.Steps {
+			label := scenarioLabel(sj.scen) + "/" + stepLabel(st)
+			endpoints = append(endpoints, tui.Endpoint{
+				Method: st.Method, Name: label, URL: st.URL, Total: sj.scen.Iterations,
+			})
+			rows = append(rows, row{method: st.Method, label: label, idx: sj.firstIdx + i})
+		}
+	}
+	return endpoints, rows
 }
 
 // resolveConfigs handles both forms of the -config argument. A
@@ -361,17 +392,14 @@ func runFromConfigPlain(bundles []configBundle, jobs []endpointJob, scenarios []
 // still complete (loader.Run is blocking; cancellation is a v1.1
 // concern). Exit code is 0 on a clean user quit even if errors
 // accumulated — the user told us to stop.
-func runFromConfigTUI(bundles []configBundle, jobs []endpointJob) int {
-	endpoints := make([]tui.Endpoint, 0, len(jobs))
-	for _, job := range jobs {
-		endpoints = append(endpoints, tui.EndpointFromConfig(job.method, job.ep))
-	}
+func runFromConfigTUI(bundles []configBundle, jobs []endpointJob, scenarios []scenarioJob) int {
+	endpoints, rows := buildTUIRows(jobs, scenarios)
 
 	program := tui.NewProgram(endpoints, os.Stdout)
 
 	var (
-		summaries     = make([]report.Summary, len(jobs))
-		summariesDone = make([]bool, len(jobs))
+		summaries     = make([]report.Summary, len(rows))
+		summariesDone = make([]bool, len(rows))
 		quitRequested atomic.Bool
 		runStart      = time.Now()
 		workerDone    = make(chan struct{})
@@ -379,9 +407,9 @@ func runFromConfigTUI(bundles []configBundle, jobs []endpointJob) int {
 
 	go func() {
 		defer close(workerDone)
-		// Fan out: every endpoint runs concurrently in its own
-		// goroutine. A WaitGroup gates the Done message until all
-		// have finished naturally OR the user has quit and the
+		// Fan out: every endpoint and every scenario runs concurrently
+		// in its own goroutine. A WaitGroup gates the Done message until
+		// all have finished naturally OR the user has quit and the
 		// in-flight batches drain.
 		var wg sync.WaitGroup
 		for _, job := range jobs {
@@ -399,6 +427,28 @@ func runFromConfigTUI(bundles []configBundle, jobs []endpointJob) int {
 				summariesDone[j.idx] = true
 				program.Send(tui.EndpointEnd{Index: j.idx})
 			}(job)
+		}
+		for _, sj := range scenarios {
+			if quitRequested.Load() {
+				break
+			}
+			wg.Add(1)
+			go func(s scenarioJob) {
+				defer wg.Done()
+				// Mark every step row as in-play up front; results stream
+				// into each as the chain reaches that step.
+				for i := range s.scen.Steps {
+					program.Send(tui.EndpointStart{Index: s.firstIdx + i})
+				}
+				stepSummaries := runOneScenario(s, func(rowIdx int, r loader.Result) {
+					program.Send(tui.Result(rowIdx, r))
+				})
+				for i, sum := range stepSummaries {
+					summaries[s.firstIdx+i] = sum
+					summariesDone[s.firstIdx+i] = true
+					program.Send(tui.EndpointEnd{Index: s.firstIdx + i})
+				}
+			}(sj)
 		}
 		wg.Wait()
 		program.Send(tui.Done{})
@@ -420,21 +470,21 @@ func runFromConfigTUI(bundles []configBundle, jobs []endpointJob) int {
 	// reprinting the verbose per-endpoint report we already showed
 	// live. Users who want the full breakdown can re-run with
 	// stdout piped (which uses the plain-text path automatically).
-	printCompactSummary(bundles, jobs, summaries, summariesDone, totalElapsed)
+	printCompactSummary(bundles, rows, summaries, summariesDone, totalElapsed)
 
-	// If any endpoint returned a non-2xx status or had transport
-	// errors, open a pager with the per-endpoint detail. Short
-	// content flies through via `less -F`; long content paginates
-	// and the user q's out. Skipped silently when no pager is
-	// available, when stdout isn't a TTY, or when RKLOAD_NO_PAGER=1.
-	if hasUnexpectedResults(jobs, summaries, summariesDone) {
-		showUnexpectedInPager(jobs, summaries, summariesDone)
+	// If any row returned a non-2xx status or had transport errors,
+	// open a pager with the per-row detail. Short content flies through
+	// via `less -F`; long content paginates and the user q's out.
+	// Skipped silently when no pager is available, when stdout isn't a
+	// TTY, or when RKLOAD_NO_PAGER=1.
+	if hasUnexpectedResults(rows, summaries, summariesDone) {
+		showUnexpectedInPager(rows, summaries, summariesDone)
 	}
 
 	totalErrors := 0
-	for _, job := range jobs {
-		if summariesDone[job.idx] {
-			totalErrors += summaries[job.idx].Errors
+	for _, r := range rows {
+		if summariesDone[r.idx] {
+			totalErrors += summaries[r.idx].Errors
 		}
 	}
 	if userQuit {
@@ -449,12 +499,12 @@ func runFromConfigTUI(bundles []configBundle, jobs []endpointJob) int {
 // hasUnexpectedResults reports whether any completed endpoint
 // produced a non-2xx response or a transport-level error. Used to
 // decide whether the post-summary pager view is worth opening.
-func hasUnexpectedResults(jobs []endpointJob, summaries []report.Summary, done []bool) bool {
-	for _, job := range jobs {
-		if !done[job.idx] {
+func hasUnexpectedResults(rows []row, summaries []report.Summary, done []bool) bool {
+	for _, r := range rows {
+		if !done[r.idx] {
 			continue
 		}
-		s := summaries[job.idx]
+		s := summaries[r.idx]
 		if s.Errors > 0 {
 			return true
 		}
@@ -476,8 +526,8 @@ func hasUnexpectedResults(jobs []endpointJob, summaries []report.Summary, done [
 // The pager flags `-FRX` are the canonical "smart pager" combo
 // (also what git uses): -F quits if content fits on one screen,
 // -R preserves ANSI colour, -X doesn't clear the screen on exit.
-func showUnexpectedInPager(jobs []endpointJob, summaries []report.Summary, done []bool) {
-	content := renderUnexpectedReport(jobs, summaries, done)
+func showUnexpectedInPager(rows []row, summaries []report.Summary, done []bool) {
+	content := renderUnexpectedReport(rows, summaries, done)
 	if content == "" {
 		return
 	}
@@ -518,7 +568,7 @@ func showUnexpectedInPager(jobs []endpointJob, summaries []report.Summary, done 
 //
 // Each line is `<code> <name>: <count>` so the output is greppable
 // and the standard-name column lines up across rows.
-func renderUnexpectedReport(jobs []endpointJob, summaries []report.Summary, done []bool) string {
+func renderUnexpectedReport(rows []row, summaries []report.Summary, done []bool) string {
 	border := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	header := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("250"))
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
@@ -534,11 +584,11 @@ func renderUnexpectedReport(jobs []endpointJob, summaries []report.Summary, done
 	b.WriteString("\n")
 
 	any := false
-	for _, job := range jobs {
-		if !done[job.idx] {
+	for _, rw := range rows {
+		if !done[rw.idx] {
 			continue
 		}
-		s := summaries[job.idx]
+		s := summaries[rw.idx]
 
 		var unexpected []int
 		for code := range s.StatusCodes {
@@ -552,7 +602,7 @@ func renderUnexpectedReport(jobs []endpointJob, summaries []report.Summary, done
 		sort.Ints(unexpected)
 		any = true
 
-		title := fmt.Sprintf("%s %s", job.method, endpointLabel(job.ep))
+		title := fmt.Sprintf("%s %s", rw.method, rw.label)
 		b.WriteString("\n")
 		b.WriteString(red.Render("✗ ") + lipgloss.NewStyle().Bold(true).Render(title))
 		b.WriteString(dim.Render(fmt.Sprintf("    %d total requests, %d errors", s.Total, s.Errors)))
@@ -606,7 +656,7 @@ func renderUnexpectedReport(jobs []endpointJob, summaries []report.Summary, done
 //
 // Only invoked on the TUI path (TTY-only), so ANSI styles are
 // appropriate; non-TTY runs use the verbose plain-text reporter.
-func printCompactSummary(bundles []configBundle, jobs []endpointJob,
+func printCompactSummary(bundles []configBundle, rows []row,
 	summaries []report.Summary, done []bool, elapsed time.Duration) {
 
 	titleColor := lipgloss.Color("63")
@@ -616,16 +666,16 @@ func printCompactSummary(bundles []configBundle, jobs []endpointJob,
 	border := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	header := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("250"))
 
-	totalRequests, totalErrors, endpointsDone := 0, 0, 0
+	totalRequests, totalErrors, rowsDone := 0, 0, 0
 	allStatus := map[int]int{}
-	for _, job := range jobs {
-		if !done[job.idx] {
+	for _, rw := range rows {
+		if !done[rw.idx] {
 			continue
 		}
-		s := summaries[job.idx]
+		s := summaries[rw.idx]
 		totalRequests += s.Total
 		totalErrors += s.Errors
-		endpointsDone++
+		rowsDone++
 		for code, n := range s.StatusCodes {
 			allStatus[code] += n
 		}
@@ -635,12 +685,12 @@ func printCompactSummary(bundles []configBundle, jobs []endpointJob,
 	fmt.Println()
 	titleLine := lipgloss.NewStyle().Bold(true).Foreground(titleColor).Render("rkload — done") +
 		"  " + lipgloss.NewStyle().Foreground(dimColor).Render(fmt.Sprintf(
-		"Configs: %d   Endpoints: %d   Requests: %d   Elapsed: %s",
-		len(bundles), endpointsDone, totalRequests, formatShortDuration(elapsed)))
+		"Configs: %d   Rows: %d   Requests: %d   Elapsed: %s",
+		len(bundles), rowsDone, totalRequests, formatShortDuration(elapsed)))
 	fmt.Println(titleLine)
-	if endpointsDone < len(jobs) {
+	if rowsDone < len(rows) {
 		fmt.Println(lipgloss.NewStyle().Foreground(dimColor).Render(
-			fmt.Sprintf("                Skipped: %d (user quit)", len(jobs)-endpointsDone)))
+			fmt.Sprintf("                Skipped: %d (user quit)", len(rows)-rowsDone)))
 	}
 	fmt.Println()
 
@@ -649,7 +699,7 @@ func printCompactSummary(bundles []configBundle, jobs []endpointJob,
 	t := lgtable.New().
 		Border(lipgloss.RoundedBorder()).
 		BorderStyle(border).
-		Headers("STATUS", "METHOD", "ENDPOINT", "DONE", "R/S", "AVG", "P50", "P95", "P99").
+		Headers("STATUS", "METHOD", "TARGET", "DONE", "R/S", "AVG", "P50", "P95", "P99").
 		StyleFunc(func(row, col int) lipgloss.Style {
 			if row == lgtable.HeaderRow {
 				return header.Padding(0, 1).Align(lipgloss.Left)
@@ -662,22 +712,22 @@ func printCompactSummary(bundles []configBundle, jobs []endpointJob,
 			if row < 0 {
 				return base
 			}
-			return base.Foreground(rowColorFromIndex(row, jobs, summaries, done, greenColor, redColor, dimColor))
+			return base.Foreground(rowColorFromIndex(row, rows, summaries, done, greenColor, redColor, dimColor))
 		})
 
-	for _, job := range jobs {
-		if !done[job.idx] {
+	for _, rw := range rows {
+		if !done[rw.idx] {
 			continue
 		}
-		s := summaries[job.idx]
+		s := summaries[rw.idx]
 		status := "✓ done"
 		if summaryHasUnexpected(s) {
 			status = "✗ fail"
 		}
 		t.Row(
 			status,
-			job.method,
-			truncate(endpointLabel(job.ep), 40),
+			rw.method,
+			truncate(rw.label, 40),
 			fmt.Sprintf("%d/%d", s.Successful, s.Total),
 			fmt.Sprintf("%.1f r/s", s.Throughput),
 			formatShortDuration(s.AvgLatency),
@@ -720,15 +770,15 @@ func printCompactSummary(bundles []configBundle, jobs []endpointJob,
 // summary table now flips a row red when the endpoint only returned
 // non-2xx statuses (which previously displayed green-checkmark
 // success because the loader saw no transport errors).
-func rowColorFromIndex(row int, jobs []endpointJob, summaries []report.Summary,
+func rowColorFromIndex(rowIdx int, rows []row, summaries []report.Summary,
 	done []bool, greenColor, redColor, dimColor lipgloss.Color) lipgloss.Color {
 	i := 0
-	for _, job := range jobs {
-		if !done[job.idx] {
+	for _, r := range rows {
+		if !done[r.idx] {
 			continue
 		}
-		if i == row {
-			if summaryHasUnexpected(summaries[job.idx]) {
+		if i == rowIdx {
+			if summaryHasUnexpected(summaries[r.idx]) {
 				return redColor
 			}
 			return greenColor
