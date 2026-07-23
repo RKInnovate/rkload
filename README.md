@@ -3,7 +3,6 @@
 > A scenario-driven HTTP load testing tool, built for real production validation.
 
 [![CI](https://github.com/RKInnovate/rkload/actions/workflows/ci.yml/badge.svg)](https://github.com/RKInnovate/rkload/actions/workflows/ci.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/RKInnovate/rkload)](https://goreportcard.com/report/github.com/RKInnovate/rkload)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/RKInnovate/rkload)](./go.mod)
 
