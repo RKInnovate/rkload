@@ -160,6 +160,12 @@ func (e *Endpoint) ParsedTimeout() (time.Duration, error) {
 	return time.ParseDuration(e.Timeout)
 }
 
+// ParsedTimeout returns the scenario's Timeout as a time.Duration. As
+// with Endpoint, validation guarantees the string parses.
+func (s *Scenario) ParsedTimeout() (time.Duration, error) {
+	return time.ParseDuration(s.Timeout)
+}
+
 // Load reads, parses, validates, and default-fills a JSON config file.
 // Unknown fields are rejected (additionalProperties:false in the schema)
 // so a typo like "url:" → "ulr:" surfaces immediately instead of being
@@ -248,6 +254,11 @@ func (c *Config) Validate() error {
 	if err != nil {
 		return err
 	}
+	for i := range c.Scenarios {
+		if err := c.Scenarios[i].validate(i); err != nil {
+			return err
+		}
+	}
 
 	if endpointTotal == 0 && len(c.Scenarios) == 0 {
 		if c.Version >= 2 {
@@ -299,6 +310,64 @@ func (e *Endpoint) validate(method string, index int) error {
 	return nil
 }
 
+// validate checks a scenario's own fields and each of its steps. Rule-
+// level validation of extract/assert/auth is layered on separately.
+func (s *Scenario) validate(index int) error {
+	loc := fmt.Sprintf("scenarios[%d]", index)
+
+	if len(s.Name) > 80 {
+		return fmt.Errorf("config: %s: name exceeds 80 characters", loc)
+	}
+	if s.VUs < 0 || s.VUs > 10000 {
+		return fmt.Errorf("config: %s: vus=%d out of range [1,10000]", loc, s.VUs)
+	}
+	if s.Iterations < 0 {
+		return fmt.Errorf("config: %s: iterations=%d must be >= 0", loc, s.Iterations)
+	}
+	if s.Timeout != "" {
+		if _, err := time.ParseDuration(s.Timeout); err != nil {
+			return fmt.Errorf("config: %s: invalid timeout %q: %w", loc, s.Timeout, err)
+		}
+	}
+	if len(s.Steps) == 0 {
+		return fmt.Errorf("config: %s: must define at least one step", loc)
+	}
+	for i := range s.Steps {
+		if err := s.Steps[i].validate(loc, i); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (st *Step) validate(scenarioLoc string, index int) error {
+	loc := fmt.Sprintf("%s.steps[%d]", scenarioLoc, index)
+
+	if st.URL == "" {
+		return fmt.Errorf(`config: %s: "url" is required`, loc)
+	}
+	if !strings.HasPrefix(st.URL, "http://") && !strings.HasPrefix(st.URL, "https://") {
+		return fmt.Errorf("config: %s: url %q must start with http:// or https://", loc, st.URL)
+	}
+	if st.Method != "" && !knownMethod(st.Method) {
+		return fmt.Errorf("config: %s: unknown method %q", loc, st.Method)
+	}
+	if len(st.Name) > 80 {
+		return fmt.Errorf("config: %s: name exceeds 80 characters", loc)
+	}
+	return nil
+}
+
+// knownMethod reports whether m is one of the HTTP methods rkload
+// recognises (the same set used for top-level endpoint groups).
+func knownMethod(m string) bool {
+	switch m {
+	case "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS":
+		return true
+	}
+	return false
+}
+
 // ApplyDefaults fills zero-valued fields with their defaults so callers
 // don't need to second-guess what 0/empty means. Idempotent — calling it
 // twice produces the same result.
@@ -314,6 +383,23 @@ func (c *Config) ApplyDefaults() {
 			}
 			if ep.Timeout == "" {
 				ep.Timeout = DefaultTimeout
+			}
+		}
+	}
+	for i := range c.Scenarios {
+		s := &c.Scenarios[i]
+		if s.VUs == 0 {
+			s.VUs = DefaultConcurrency
+		}
+		if s.Iterations == 0 {
+			s.Iterations = DefaultRequests
+		}
+		if s.Timeout == "" {
+			s.Timeout = DefaultTimeout
+		}
+		for j := range s.Steps {
+			if s.Steps[j].Method == "" {
+				s.Steps[j].Method = "GET"
 			}
 		}
 	}

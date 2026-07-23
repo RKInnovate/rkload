@@ -1,0 +1,51 @@
+{
+  "$schema": "https://raw.githubusercontent.com/RKInnovate/rkload/main/schemas/v2/config.schema.json",
+  "version": 2,
+
+  "GET": [
+    {
+      "url": "https://api.example.com/health"
+    }
+  ],
+
+  "scenarios": [
+    {
+      "name": "login-call-logout",
+      "vus": 5,
+      "iterations": 50,
+      "timeout": "10s",
+      "auth": { "type": "bearer", "token": "${API_TOKEN}" },
+      "steps": [
+        {
+          "name": "login",
+          "method": "POST",
+          "url": "https://api.example.com/auth/login",
+          "headers": { "Content-Type": "application/json" },
+          "body": "{\"email\":\"${EMAIL}\",\"password\":\"${PASSWORD}\"}",
+          "extract": [
+            { "var": "token", "from": "json", "path": "data.accessToken" },
+            { "var": "rid", "from": "header", "name": "X-Request-Id" }
+          ],
+          "assert": [
+            { "type": "status", "equals": 200 },
+            { "type": "body-contains", "value": "accessToken" },
+            { "type": "json-equals", "path": "data.tokenType", "value": "Bearer" }
+          ]
+        },
+        {
+          "name": "call",
+          "method": "GET",
+          "url": "https://api.example.com/me",
+          "headers": { "Authorization": "Bearer ${token}" },
+          "assert": [ { "type": "status", "equals": 200 } ]
+        },
+        {
+          "name": "logout",
+          "method": "POST",
+          "url": "https://api.example.com/auth/logout",
+          "headers": { "Authorization": "Bearer ${token}" }
+        }
+      ]
+    }
+  ]
+}
